@@ -1,7 +1,6 @@
 # Raw and processed data files, manuscript files, output files
 data/
 data-raw/
-output/
 
 # History files
 .Rhistory
