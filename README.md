@@ -6,6 +6,7 @@ Course material for the teaching unit "Omics" of the Master's programme "Public 
 
 - `slides/`: lecture slides
 - `practicals/`: practical sessions as R Markdown, with `questions/` and `solutions/` versions
+- `scripts/`: helper scripts, e.g. `make_questions.R`, which generates the `questions/` files from the `solutions/` files (edit the solutions, not the questions)
 - `examples/`: R scripts used to generate the demonstration figures shown in the slides
 
 ## Usage
