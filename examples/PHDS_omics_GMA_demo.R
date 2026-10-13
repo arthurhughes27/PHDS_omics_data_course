@@ -3,7 +3,7 @@ library(dplyr)
 library(here)
 
 # Figures are saved to <project root>/figures (the folder is created if needed)
-figure_directory = here("figures")
+figure_directory = here("output", "figures")
 dir.create(figure_directory, showWarnings = FALSE)
 
 # Plot 1 : motivation - disease subtypes by severity and number of symptoms
