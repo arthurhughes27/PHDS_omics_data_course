@@ -1,3 +1,8 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
 # Task Overview
 
 > We are going to re-analyse a dataset containing transcriptomic samples from healthy patients and patients infected with mycobacterium tuberculosis, which causes tuberculosis disease. This data has previously been analysed by [Singhania et al, 2018](https://www.nature.com/articles/s41467-018-04579-w). Tuberculosis is a heterogeneous disease with high global burden. Patients infected with mycobacterium tuberculosis can be classified as active or latent infections, depending on whether clinical symptoms are present or not. Diagnosing tuberculosis infection can be difficult, especially in asymptomatic patients with latent tuberculosis infection (LTBI). 
