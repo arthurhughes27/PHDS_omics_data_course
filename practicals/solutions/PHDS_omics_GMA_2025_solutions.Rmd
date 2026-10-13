@@ -57,6 +57,8 @@ omics_practicals/
 > 2. Copy this practical (the `.Rmd` file) into the `analysis` folder.
 > 3. In the `Files` pane of RStudio, open the `analysis` folder and click on the `.Rmd` file to open it. 
 
+> You will also receive two small "catch-up" files, `counts_protein_coding.rds` and `counts_combat_log2_cpm_tmm.rds`. Copy them into a new folder `data-raw/checkpoints`. They are only used to let you continue if you get stuck on a task.
+
 > **Important:** always start your work by opening the project (double-click `omics_practicals.Rproj`, or use `File > Open Project`), and open the `.Rmd` file from *within* RStudio's `Files` pane. If you open the `.Rmd` file directly from your Downloads folder, it will not be part of the project and the paths below will not work.
 
 ### How do we refer to files?
@@ -342,6 +344,14 @@ message(
 > **Answer:** 32,221 genes were removed from the data.
 <!-- /solution -->
 
+<!-- solution:text -->
+```{r, include = FALSE}
+# Catch-up file for the students : the questions file loads it if their own object is missing
+dir.create(here("data-raw", "checkpoints"), showWarnings = FALSE, recursive = TRUE)
+saveRDS(counts_protein_coding, here("data-raw", "checkpoints", "counts_protein_coding.rds"))
+```
+<!-- /solution -->
+
 > Now that we have finished loading and merging the data, we can remove the unnecessary objects from the global environment with the `rm()` function. This is good practice with high-dimensional data, as memory can quickly be filled by large, unnecessary objects.
 
 ```{r}
@@ -424,6 +434,8 @@ counts_log2_cpm[1:5, 1:5]
 > In the lecture, we introduced principal component analysis (PCA) as a useful tool for representing high-dimensional data in a lower-dimensional space, while preserving the signals which contribute to between-sample variability.
 
 > I will first demonstrate how to use the `prcomp()` function to perform a PCA on the non-normalised data. Since PCA is sensitive to the scale of the data, it is important to center and scale the data (such that every variable has mean 0 and standard deviation 1) using the `center` and `scale.` arguments of `prcomp()`.
+
+<!-- checkpoint:counts_protein_coding -->
 
 ```{r}
 pca_raw <- prcomp(counts_protein_coding, center = TRUE, scale. = TRUE)
@@ -600,6 +612,14 @@ pca_combat_plot
 > **Answer:** The batch effect appears to have been mitigated.
 <!-- /solution -->
 
+<!-- solution:text -->
+```{r, include = FALSE}
+# Catch-up file for the students : the questions file loads it if their own object is missing
+dir.create(here("data-raw", "checkpoints"), showWarnings = FALSE, recursive = TRUE)
+saveRDS(counts_combat_log2_cpm_tmm, here("data-raw", "checkpoints", "counts_combat_log2_cpm_tmm.rds"))
+```
+<!-- /solution -->
+
 > Since we have finished with the pre-processing, we can remove the unnecessary objects from the global environment again.
 
 ```{r}
@@ -664,6 +684,8 @@ sample_status <- metadata_all$Status
 ```
 
 > We can now compute the distances between the samples using the `dist()` function.
+
+<!-- checkpoint:counts_combat_log2_cpm_tmm -->
 
 ```{r}
 sample_distances <- dist(counts_combat_log2_cpm_tmm, method = "euclidean")
