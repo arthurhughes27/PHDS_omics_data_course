@@ -1,3 +1,8 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
 # Task Overview
 
 > We are going to re-analyse a dataset containing transcriptomic samples from healthy patients and patients infected with mycobacterium tuberculosis, which causes tuberculosis disease. This data has previously been analysed by [Singhania et al, 2018](https://www.nature.com/articles/s41467-018-04579-w). Tuberculosis is a heterogeneous disease with high global burden. Patients infected with mycobacterium tuberculosis can be classified as active or latent infections, depending on whether clinical symptoms are present or not. Diagnosing tuberculosis infection can be difficult, especially in asymptomatic patients with latent tuberculosis infection (LTBI). 
@@ -230,7 +235,6 @@ colnames(infos_df_southafrica)[-1] <-
 infos_df_leicester <- build_info_df(leicester_metadata)
 colnames(infos_df_leicester)[-1] <-
   c("Cohort", "Location", "Status", "Set", "SampleName")
-infos_df_leicester <- infos_df_leicester[, c(1, 2, 3, 5, 4, 6)]
 ```
 
 ## 0g) Merge data
@@ -249,7 +253,7 @@ counts_merged <-
     x = merge(x = london_raw, y = southafrica_raw, by = c(1:3)),
     y = leicester_raw,
     by = c(1:3)
-  ) %>% select(-Gene_name, -Gene_biotype)
+  ) %>% dplyr::select(-Gene_name, -Gene_biotype)
 
 # Pivot to wide format : transpose so that samples are rows (the first row, which contains the gene names, is dropped)
 counts_all <- t(counts_merged)[-1, ] %>% as.data.frame()
@@ -271,20 +275,27 @@ merged_all <- merge(
 metadata_cols <- c("SampleName", "GSMID", "Cohort", "Location", "Set", "Status")
 
 # Extract the counts and store them as numeric values in the dataframe
-counts_all <- merged_all %>% select(-all_of(metadata_cols)) %>% sapply(as.numeric) %>% as.data.frame()
+counts_all <- merged_all %>% 
+  dplyr::select(-all_of(metadata_cols)) %>% 
+  sapply(as.numeric) %>% 
+  as.data.frame()
 
 # Extract the metadata
-metadata_all <- merged_all %>% select(all_of(metadata_cols))
+metadata_all <- merged_all %>% 
+  dplyr::select(all_of(metadata_cols))
 
 # Visualise the start of the merged dataframe
-merged_all[, c(1:8)] %>% head(5)
+merged_all[, c(1:8)] %>% 
+  head(5)
 ```
 
 # 1) Data pre-processing
 
 ## 1a) Remove unexpressed genes
 
-> Counts matrices usually contain some completely uninformative variables (i.e. with 0 counts in every sample). Remove these from the data and report how many columns were removed. 
+> A typical pre-processing step is to remove genes which are unexpressed (or expressed at a constant level) in every sample, since these provide no information. Remove these genes from the data.
+
+> How many genes do you remove with this step?
 
 ```{r}
 # Extract the total counts for each gene
@@ -295,7 +306,7 @@ unexpressed_genes <- colnames(counts_all)[count_sums == 0]
 
 # Remove these from the data
 counts_all_filtered <- counts_all %>% 
-  select(-all_of(unexpressed_genes))
+  dplyr::select(-all_of(unexpressed_genes))
 
 # how many genes were removed?
 message(paste0(
@@ -304,15 +315,18 @@ message(paste0(
 ))
 ```
 
+> **Answer:** 6,443 genes were removed from the data.
+
 ## 1b) Remove non-protein coding genes
 
 > Many investigators only include protein-coding genes in their analysis. Information on whether a gene is protein coding or not may be found in the raw counts under the Gene_biotype columns. For example, the first biotype values for the London data are:
 
 ```{r}
-london_raw$Gene_biotype %>% head()
+london_raw$Gene_biotype %>% 
+  head()
 ```
 
-> Using this information, filter the counts to only include genes that are protein-coding. Report the number of genes removed at this stage. 
+> Using this information, filter the counts to only include genes that are protein-coding. How many genes were removed in this stage?
 
 ```{r}
 # Use the london data to extract the names of the protein-coding genes
@@ -322,7 +336,7 @@ non_protein_coding_genes <- london_raw %>%
 
 # De-select non-protein-coding genes from the counts matrix
 counts_all_filtered_proteincoding <- counts_all_filtered %>%
-  select(!any_of(non_protein_coding_genes))
+  dplyr::select(!any_of(non_protein_coding_genes))
 
 # how many genes were removed?
 message(paste0(
@@ -331,12 +345,13 @@ message(paste0(
 ))
 ```
 
+> **Answer:** 32,221 genes were removed from the data.
+
 > Now we are finished with the data loading and merging, we may remove all of the unnecessary data from the global environment using the `rm()` function. This is good practice when using high-dimensional data, as memory can quickly be occupied by large, unnecessary files in the global environment. 
 
 ```{r}
 # Here we list the objects to keep
-keep <-
-  c("metadata_all",
+keep <- c("metadata_all",
     "counts_all_filtered_proteincoding")
 
 # Remove everything else from the global environment
@@ -354,7 +369,7 @@ invisible(gc())
 
 > The library size of a sample is the total number of counts across all genes. Compute the library sizes and visualise them on a bar chart using `ggplot2`. Colour the samples by the study from which it came. What do you notice? 
 
-> This is the first figure we make, so save it in your `output` folder using `ggsave()`, with `here()` to build the path (e.g. `here("output", "library_sizes.png")`). Do this for every figure you want to keep.
+> Save this figure in your `output` folder using `ggsave()`, with `here()` to build the path (e.g. `here("output", "library_sizes.png")`). Use this practice for every figure you produce in this practical, ensuring that the saved figure has reasonable text sizes, axis names, etc. 
 
 ```{r}
 # Create a new dataframe to store the library sizes, the sample identifier, and the study name
@@ -390,30 +405,59 @@ library_sizes_plot
 
 ## 2b) Log2-CPM normalisation
 
-> A simple way to address the library size problem is simply to normalise the raw integer counts by dividing by the library size. The variant of this approach which is often used is a transformation called *counts-per-million*. This is calculated by first dividing each count by its sample's library size, then multiplying by a million. 
+> In the lecture, we introduced a simple way to normalise data based on library size:log2-Counts-per-million (log2-CPM). This is calculated by first dividing each count by its sample's library size, then multiplying by a million, and finally taking a log2 transformation. 
 
 > Using the `cpm()` (counts-per-million) function from the `edgeR` package with the `log = TRUE` argument, compute the log2-CPM of these data. 
 
-> Principal component analysis is a useful tool for representing the data in a lower-dimensional space while preserving signals which contribute to between-sample variability. Perform a PCA using the `prcomp()` function. Plot the samples on the first two principal components, coloured by location. Has this normalisation step removed the study-effect?
+> **Tip**: If you are unsure about how this function works, use the code ``?cpm()`` to bring up the documentation in the Help panel in Rstudio.
 
 ```{r}
-# Make a DGEList object with the raw counts (DGEList expects genes in rows, so we transpose)
-dge <- DGEList(t(counts_all_filtered_proteincoding))
+dge <- t(counts_all_filtered_proteincoding)
 
 # Convert the raw counts into Log2-CPM
 counts_log2_cpm <-
-  cpm(dge, log = TRUE) %>% t() %>% as.data.frame()
+  cpm(dge, log = TRUE) %>% 
+  t() %>% 
+  as.data.frame()
+```
 
-# Perform PCA on the cpm counts
+> As a sanity check, I recommend that you inspect the data and compare it to the non-normalised dataset to convince yourself that everything looks OK. 
+
+> In the lecture, we introduced Principal component analysis (PCA) as a useful tool for representing high-dimensional data in a lower-dimensional space, while preseving signals which contribute to between-sample variability. 
+
+> I will first demonstrate how to use the `prcomp()` function to perform a PCA on the non-normalised data. Note that, since PCA is sensitive to the scale of the data, it is important to center and scale the data (such that every variable has mean 0 and sd 1) using the arguments `center` and `scale.` arguments in `prcomp()`.
+
+```{r}
+# Perform PCA on the raw (filtered) counts
 pca_res <-
-  prcomp(counts_log2_cpm,
+  prcomp(counts_all_filtered_proteincoding,
          center = TRUE,
          scale. = TRUE)
 
+# The coordinates projected into the principal component space can be extracted as
+pc_coordinates = pca_res$x
+
+# The columns of the objects correspond to the PCs, i.e. the values of the samples projected onto PC1 are
+pc_coordinates[, 1] %>% 
+  head()
+
+# The proportion of variability explained by each PC can also be extracted with 
+pc_prop_variability = summary(pca_res)$importance %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  dplyr::select(`Proportion of Variance`)
+
+# For example, the proportion explained by the first PC is 
+pc_prop_variability[1,]
+```
+
+> I will now demonstrate how we can visualise the data in a reduced dimension using the results of the PCA. In particular, we might be interested in how the study location (London, Leicester, or South Africa) contributes to variability in the data. To do this, we can visualise the samples projected onto the first 2 PCs and colour the points by the location. 
+
+```{r}
 # Extract PC1 and PC2 for plotting
 pca_df <- data.frame(
-  PC1 = pca_res$x[, 1],
-  PC2 = pca_res$x[, 2],
+  PC1 = pc_coordinates[, 1],
+  PC2 = pc_coordinates[, 2],
   Location = metadata_all$Location,
   Sample = metadata_all$SampleName
 )
@@ -423,16 +467,67 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = Location)) +
   geom_point(size = 3, alpha = 0.5) +
   theme_minimal(base_size = 20) +
   labs(
-    x = paste0("PC1 (", round(summary(pca_res)$importance[2, 1] * 100, 1), "%)"),
-    y = paste0("PC2 (", round(summary(pca_res)$importance[2, 2] * 100, 1), "%)"),
+    x = paste0("PC1 (", round(pc_prop_variability[1,] * 100, 1), "%)"), # Annotation: percentage of variability explained by PC1
+    y = paste0("PC2 (", round(pc_prop_variability[2,] * 100, 1), "%)"), # Annotation: percentage of variability explained by PC2
     color = "Location",
-    title = "PCA of log2-CPM-transformed data"
+    title = "PCA of raw data"
   )
 ```
 
+> What does this visualisation tell us?
+
+> **Answer**: A large amount of variability in the data can be explained just by one variable. This is likely due to the strong influence of the Location variable, showing that a batch effect is present.  
+
+> Now, use the example above to perform a PCA using the `prcomp()` function on the log2-CPM normalised data. Has this normalisation step removed the study-effect?
+
+```{r}
+# Perform PCA on the raw (filtered) counts
+pca_res <-
+  prcomp(counts_log2_cpm,
+         center = TRUE,
+         scale. = TRUE)
+
+# The coordinates projected into the principal component space can be extracted as
+pc_coordinates = pca_res$x
+
+# The columns of the objects correspond to the PCs, i.e. the values of the samples projected onto PC1 are
+pc_coordinates[, 1] %>% 
+  head()
+
+# The proportion of variability explained by each PC can also be extracted with 
+pc_prop_variability = summary(pca_res)$importance %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  dplyr::select(`Proportion of Variance`)
+
+# For example, the proportion explained by the first PC is 
+pc_prop_variability[1,]
+
+# Extract PC1 and PC2 for plotting
+pca_df <- data.frame(
+  PC1 = pc_coordinates[, 1],
+  PC2 = pc_coordinates[, 2],
+  Location = metadata_all$Location,
+  Sample = metadata_all$SampleName
+)
+
+# Plot PC1 and PC2, colour points by location
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Location)) +
+  geom_point(size = 3, alpha = 0.5) +
+  theme_minimal(base_size = 20) +
+  labs(
+    x = paste0("PC1 (", round(pc_prop_variability[1,] * 100, 1), "%)"), # Annotation: percentage of variability explained by PC1
+    y = paste0("PC2 (", round(pc_prop_variability[2,] * 100, 1), "%)"), # Annotation: percentage of variability explained by PC2
+    color = "Location",
+    title = "PCA of log2-cpm data"
+  )
+```
+
+> **Answer**: The batch effect is still present. In particular, the samples from the Leicester cohort are very separated from the others on PC1.
+
 ## 2c) Log2-CPM-TMM Normalisation
 
-> Another typical normalisation approach is to use the *trimmed mean of M-values* (TMM) method. Calculate the normalisation factors on the raw counts data using the `calcNormFactors()` function in `edgeR` with the argument `method = "TMM"` applied to a `DGEList()` object. Then, convert this object into log2CPM using the `cpm()` function as before. Using your previous code, plot the points on the first two principal components, coloured by location. Has this normalisation step solved the problem?
+> Another typical normalisation approach is to use the *trimmed mean of M-values* (TMM) method. This calculates normalisation factors which exclude extreme values. This normalisation can be achieved through the following code. 
 
 ```{r}
 # Make a DGEList object with the raw counts (genes in rows, so we transpose)
@@ -443,18 +538,40 @@ dge <- calcNormFactors(dge_list, method = "TMM")
 
 # Convert the raw counts into Log2-CPM-TMM
 counts_log2_cpm_tmm <-
-  cpm(dge, log = TRUE) %>% t() %>% as.data.frame()
+  cpm(dge, log = TRUE) %>% 
+  t() %>% 
+  as.data.frame()
+``` 
 
-# Perform PCA on the cpm counts
+> Using your previous code, plot the points on the first two principal components, coloured by location. Has this normalisation step solved the problem?
+
+```{r}
+# Perform PCA on the raw (filtered) counts
 pca_res <-
   prcomp(counts_log2_cpm_tmm,
          center = TRUE,
          scale. = TRUE)
 
+# The coordinates projected into the principal component space can be extracted as
+pc_coordinates = pca_res$x
+
+# The columns of the objects correspond to the PCs, i.e. the values of the samples projected onto PC1 are
+pc_coordinates[, 1] %>% 
+  head()
+
+# The proportion of variability explained by each PC can also be extracted with 
+pc_prop_variability = summary(pca_res)$importance %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  dplyr::select(`Proportion of Variance`)
+
+# For example, the proportion explained by the first PC is 
+pc_prop_variability[1,]
+
 # Extract PC1 and PC2 for plotting
 pca_df <- data.frame(
-  PC1 = pca_res$x[, 1],
-  PC2 = pca_res$x[, 2],
+  PC1 = pc_coordinates[, 1],
+  PC2 = pc_coordinates[, 2],
   Location = metadata_all$Location,
   Sample = metadata_all$SampleName
 )
@@ -464,20 +581,20 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = Location)) +
   geom_point(size = 3, alpha = 0.5) +
   theme_minimal(base_size = 20) +
   labs(
-    x = paste0("PC1 (", round(summary(pca_res)$importance[2, 1] * 100, 1), "%)"),
-    y = paste0("PC2 (", round(summary(pca_res)$importance[2, 2] * 100, 1), "%)"),
+    x = paste0("PC1 (", round(pc_prop_variability[1,] * 100, 1), "%)"), # Annotation: percentage of variability explained by PC1
+    y = paste0("PC2 (", round(pc_prop_variability[2,] * 100, 1), "%)"), # Annotation: percentage of variability explained by PC2
     color = "Location",
-    title = "PCA of log2-CPM-TMM-transformed data"
+    title = "PCA of log2-cpm-TMM data"
   )
 ```
 
-## 2d) Batch effect correction
+> **Answer:** Even after this normalisation, there is still a study effect, especially related to the Leicester location.
 
-> **Answer:** Even after normalisation, there is still a study effect.
+## 2d) Batch effect correction
 
 > We can view the study as a batch variable, since we do not expect it to contribute much to the heterogeneity between samples. To correct for batch effects in RNA-seq data, we can use the *ComBat-Seq* method. We do this using the `ComBat_seq()` function from the `sva` package. 
 
-> In this method, we must specify two things. Firstly, the batch variable (`Location`), and secondly, a variable whose effects we want to remain intact after correction (in this case, the `Status` variable, which provides information on the disease states of the patients). Apply `ComBat_seq()` to the raw, filtered counts to correct for the `batch = Location`, while keeping preserved effects from `group = metadata_all$Status`. NB : running ComBat-Seq may take a couple of minutes. 
+> In this method, we must specify two things. Firstly, the batch variable (`Location`), and secondly, a variable whose effects we want to remain intact after correction (in this case, the `Status` variable, which provides information on the disease states of the patients). We apply *ComBat-Seq* to the raw, filtered counts to correct for the `batch = Location`, while keeping preserved effects from `group = metadata_all$Status` using the follow code (may take a couple of minutes). 
 
 ```{r}
 # Run ComBat-Seq (it expects genes in rows, so we transpose)
@@ -489,7 +606,7 @@ counts_combat <-
   )
 ```
 
-> Now that we have attempted to correct for the batch effect in the raw counts, use your previous code to normalise the data using Log2-CPM-TMM. Now visualise the data on the first two principal components and conclude if there still remains a study effect in the data. 
+> Now that we have attempted to correct for the batch effect in the raw counts, use the previous code on this corrected matrix to normalise the data using Log2-CPM-TMM. Then, visualise the data on the first two PCs, as before, and conclude if there still remains a study effect in the data. 
 
 ```{r}
 # Make a DGEList object with the raw counts
@@ -502,16 +619,32 @@ dge <- calcNormFactors(dge_list, method = "TMM")
 counts_combat_log2_cpm_tmm <-
   cpm(dge, log = TRUE) %>% t() %>% as.data.frame()
 
-# Perform PCA on the cpm counts
+# Perform PCA on the raw (filtered) counts
 pca_res <-
   prcomp(counts_combat_log2_cpm_tmm,
          center = TRUE,
          scale. = TRUE)
 
+# The coordinates projected into the principal component space can be extracted as
+pc_coordinates = pca_res$x
+
+# The columns of the objects correspond to the PCs, i.e. the values of the samples projected onto PC1 are
+pc_coordinates[, 1] %>% 
+  head()
+
+# The proportion of variability explained by each PC can also be extracted with 
+pc_prop_variability = summary(pca_res)$importance %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  dplyr::select(`Proportion of Variance`)
+
+# For example, the proportion explained by the first PC is 
+pc_prop_variability[1,]
+
 # Extract PC1 and PC2 for plotting
 pca_df <- data.frame(
-  PC1 = pca_res$x[, 1],
-  PC2 = pca_res$x[, 2],
+  PC1 = pc_coordinates[, 1],
+  PC2 = pc_coordinates[, 2],
   Location = metadata_all$Location,
   Sample = metadata_all$SampleName
 )
@@ -521,12 +654,14 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = Location)) +
   geom_point(size = 3, alpha = 0.5) +
   theme_minimal(base_size = 20) +
   labs(
-    x = paste0("PC1 (", round(summary(pca_res)$importance[2, 1] * 100, 1), "%)"),
-    y = paste0("PC2 (", round(summary(pca_res)$importance[2, 2] * 100, 1), "%)"),
+    x = paste0("PC1 (", round(pc_prop_variability[1,] * 100, 1), "%)"), # Annotation: percentage of variability explained by PC1
+    y = paste0("PC2 (", round(pc_prop_variability[2,] * 100, 1), "%)"), # Annotation: percentage of variability explained by PC2
     color = "Location",
-    title = "PCA of batch corrected, log2-CPM-transformed data"
+    title = "PCA of ComBat-Seq corrected log2-cpm-TMM data"
   )
 ```
+
+> **Answer**: the batch effect appears to have been mitigated.
 
 > Since we have finished with the pre-processing, here we can remove all useless data from the global environment. 
 
@@ -553,16 +688,32 @@ invisible(gc())
 > Perform a PCA to explore whether the variability in the gene expression data can be explained by the disease status of patients. Like before, perform a PCA on the batch-corrected-Log2-CPM-TMM-normalised data and plot the data on the first two PCs. However, this time, colour the points by their disease status. What does this suggest? 
 
 ```{r}
-# Perform PCA on the cpm counts
+# Perform PCA on the raw (filtered) counts
 pca_res <-
   prcomp(counts_combat_log2_cpm_tmm,
          center = TRUE,
          scale. = TRUE)
 
+# The coordinates projected into the principal component space can be extracted as
+pc_coordinates = pca_res$x
+
+# The columns of the objects correspond to the PCs, i.e. the values of the samples projected onto PC1 are
+pc_coordinates[, 1] %>% 
+  head()
+
+# The proportion of variability explained by each PC can also be extracted with 
+pc_prop_variability = summary(pca_res)$importance %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  dplyr::select(`Proportion of Variance`)
+
+# For example, the proportion explained by the first PC is 
+pc_prop_variability[1,]
+
 # Extract PC1 and PC2 for plotting
 pca_df <- data.frame(
-  PC1 = pca_res$x[, 1],
-  PC2 = pca_res$x[, 2],
+  PC1 = pc_coordinates[, 1],
+  PC2 = pc_coordinates[, 2],
   Status = metadata_all$Status,
   Sample = metadata_all$SampleName
 )
@@ -572,20 +723,25 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = Status)) +
   geom_point(size = 3, alpha = 0.5) +
   theme_minimal(base_size = 20) +
   labs(
-    x = paste0("PC1 (", round(summary(pca_res)$importance[2, 1] * 100, 1), "%)"),
-    y = paste0("PC2 (", round(summary(pca_res)$importance[2, 2] * 100, 1), "%)"),
+    x = paste0("PC1 (", round(pc_prop_variability[1,] * 100, 1), "%)"), # Annotation: percentage of variability explained by PC1
+    y = paste0("PC2 (", round(pc_prop_variability[2,] * 100, 1), "%)"), # Annotation: percentage of variability explained by PC2
     color = "Status",
-    title = "PCA of batch-corrected, log2-CPM-TMM-transformed data"
+    title = "PCA of ComBat-Seq corrected log2-cpm-TMM data by disease status"
   )
 ```
+
+> **Answer**: The samples with active tuberculosis seem to systematically vary from the others, suggesting that this disease state is contributing to some of the variability observed in the data.
 
 ## 3b) Hierarchical clustering
 
 > In addition, we can explore signal in the data using hierarchical clustering algorithms. Here, the goal is to determine which samples are similar and which are different. If these similarities and/or differences can be explained by the disease state, it suggests a signal might be present. 
 
-> Using the `hclust()` function from the `flashClust` package, perform an agglomerative hierarchical clustering algorithm on the gene expression with *Euclidean distance* and *complete linkage*. Compute the resulting dendrogram with the `as.dendrogram()` function. Find a way to colour the sample labels by the `Status` variable. 
+> To perform hierarchical clustering, we need three inputs: dataset, distance function defining similariy 
+> - dataset
+> - distance metric, defining similarity between data points
+> - linkage function, describing similarity between clusters
 
-> Do you notice any patterns? Is there any obvious way to determine the number of clusters in this case?
+> In this first example, I will demonstrate how we can do agglomerative hierarchical clustering on the gene expression using *Euclidean distance* and *complete linkage*, and plot the results as a dendrogram. First, we extract the sample names and disease statuses for later
 
 ```{r}
 # Extract the sample names
@@ -593,15 +749,27 @@ sample_names <- metadata_all$SampleName
 
 # Extract the disease states
 Status <- metadata_all$Status
+```
 
-# Perform hierarchical clustering
-# Compute the Euclidean distance matrix
+> We can now compute the distances between the samples using the `dist()` function. 
+
+```{r}
 distance_matrix <-
   dist(counts_combat_log2_cpm_tmm, method = "euclidean")
+```
 
+> Then, we can use the `hclust()` function from the `flashClust` package to perform agglomerative hierarchical clustering based on these distances. 
+
+```{r}
 # Perform complete linkage hierarchical clustering with hclust()
 hclust_result <- hclust(distance_matrix, method = "complete")
+```
 
+> A dendrogram can be plotted with the `as.dendrogram()` function. I will also use some code to plot this with the sample labels coloured by the `Status` variable. 
+
+> Do you notice any patterns? Is there any obvious way to determine the number of clusters in this case?
+
+```{r}
 # Compute the dendrogram
 dend <- as.dendrogram(hclust_result)
 
@@ -645,11 +813,18 @@ ggplot() +
   ) +
   theme_minimal(base_size = 20) +
   scale_color_brewer(palette = "Set1") +
-  labs(title = "Hierarchical clustering of samples (complete linkage)", x = "Samples", y = "Height", color = "Status") +
+  labs(
+    title = "Hierarchical clustering of samples (euclidean distance, complete linkage)",
+    x = "Samples",
+    y = "Height",
+    color = "Status"
+  ) +
   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
 ```
 
-> Try changing the `method` argument in the `hclust()` call to `method = "ward"`. Use your previous code to plot the dendrogram as before. A criterion to select the number of clusters which often accompanies the ward method is to select the number of clusters such that the next jump in the tree is the greatest. How many clusters would you choose with this criterion? What is your conclusion now?
+> **Answer**: some of the red samples (activeTB) tend to cluster together, although these clusters are not too distinct. This makes sense given what we previously observed with the PCA, which revealed the status to contribute to the variability in the data, but not hugely so.
+
+> Try changing the `method` argument in the `hclust()` call to `method = "ward"`. Use the previous code to plot the dendrogram as before. A criterion to select the number of clusters which often accompanies the ward method is to select the number of clusters such that the next jump in the tree is the greatest. How many clusters would you choose with this criterion? What is your conclusion now?
 
 ```{r}
 # Extract the sample names
@@ -713,6 +888,8 @@ ggplot() +
   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
 ```
 
+> **Answer**: Now the samples appear to cluster together more strongly by status. A large jump in the tree can be observed between around 600 and 800 distance. Therefore, using this method, we would cut the tree at the last jump, resulting in two clusters. 
+
 > Now clear the environment of useless data again. 
 
 ```{r}
@@ -739,7 +916,7 @@ invisible(gc())
 
 > edgeR starts with raw integer counts. We can use the counts from ComBat-Seq (prior to normalisation). Starting from a DGEList object, follow the edgeR pipeline. This starts with estimating TMM normalisation factors with `calcNormFactors()`. Then, we estimate a common dispersion using `estimateCommonDisp()`. The negative binomial model can be fit with `glmQLFit()`. P-values can be extracted with `glmQLFTest()`, and the top genes can be extracted using the `topTags()` function. 
 
-> Extract a vector of gene names which have adjusted p-value < 0.05, as well as |log2-fold-change| > 1.
+> Extract a vector of gene names which have adjusted p-value < 0.05, as well as |log2-fold-change| > 1. How many genes are differentially expressed according to this criterion?
 
 ```{r}
 # Define a new column testGroup which groups together LTBI and control patients into one control group
@@ -781,6 +958,8 @@ message(paste0(
 ))
 ```
 
+> **Answer** 2,561 differentially expressed genes were found. 
+
 > Repeat the previous experiment, but instead of estimating a common dispersion factor, estimate one for each gene using the `estimateDisp()` function. Do the results change significantly? 
 
 ```{r}
@@ -814,11 +993,13 @@ message(
 )
 ```
 
+> **Answer** 2,534 differentially expressed genes were found, which is not too different. 
+
 ## 4b) Voom-Limma
 
 > Now, we will perform the same task using voom-limma. A tutorial can be [found here](https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/thursday/DE.html).
 
-> Following the guide, apply the Voom-limma pipeline with the functions `voom()`, `lmFit()`, `eBayes()` and `decideTests()`. The output should be a vector giving the names of the differentially expressed genes defined by adjusted p-value < 0.05 and |log2-fold-change| > 1.
+> Following the guide, apply the Voom-limma pipeline with the functions `voom()`, `lmFit()`, `eBayes()` and `decideTests()`. The output should be a vector giving the names of the differentially expressed genes defined by adjusted p-value < 0.05 and |log2-fold-change| > 1. How many genes are differentially expressed?
 
 ```{r}
 # Define a DGEList object with the ComBat-Seq corrected counts
@@ -861,6 +1042,8 @@ message(paste0(
 ))
 ```
 
+> **Answer** 738 differentially expressed genes were found. 
+
 ## 4c) dearseq
 
 > Finally we will apply the dearseq pipeline. A guide can be [found here](https://www.bioconductor.org/packages/release/bioc/vignettes/dearseq/inst/doc/dearseqUserguide.html).
@@ -897,6 +1080,8 @@ message(paste0(
 ))
 ```
 
+> **Answer** 618 differentially expressed genes were found. 
+
 ## 4d) Volcano plot
 
 > A common representation of the results of DGEA is in the form of a so-called [*volcano plot*](https://olvtools.com/en/rnaseq/help/volcano-plot). The x-axis of a volcano plot is the log2FC value and the y-axis is the adjusted p-values on the log10 scale, with the axis inverted such that smaller p-values are greater on the y-axis. Typically, the ad-hoc limits which define differential expression (e.g. adjusted p-value < 0.05 and |log2FC| > 1 in our case) are represented by lines on the plot. Significantly up-regulated genes are coloured as red and significantly down-regulated genes as blue. Sometimes, the few most significant genes are given labels showing their name. 
@@ -905,7 +1090,7 @@ message(paste0(
 
 ```{r}
 # EdgeR volcano plot
-volcano_results <- results_edgeR %>% mutate(gene_name = rownames(results_edgeR)) %>% select(gene_name, FDR, logFC)
+volcano_results <- results_edgeR %>% mutate(gene_name = rownames(results_edgeR)) %>% dplyr::select(gene_name, FDR, logFC)
 
 volcano_results <- volcano_results %>%
   mutate(
@@ -970,7 +1155,7 @@ volcano_plot
 
 ```{r}
 # Voom volcano plot
-volcano_results <- results_voom %>% mutate(gene_name = rownames(results_voom)) %>% select(gene_name, adj.P.Val, logFC)
+volcano_results <- results_voom %>% mutate(gene_name = rownames(results_voom)) %>% dplyr::select(gene_name, adj.P.Val, logFC)
 
 volcano_results <- volcano_results %>%
   mutate(
@@ -1038,7 +1223,7 @@ volcano_plot
 results_dearseq <- data.frame("adjPval" = res_dearseq$pvals$adjPval,
                               "logFC" = logFC)
 
-volcano_results <- results_dearseq %>% mutate(gene_name = rownames(results_dearseq)) %>% select(gene_name, adjPval, logFC)
+volcano_results <- results_dearseq %>% mutate(gene_name = rownames(results_dearseq)) %>% dplyr::select(gene_name, adjPval, logFC)
 
 volcano_results <- volcano_results %>%
   mutate(
@@ -1103,7 +1288,7 @@ volcano_plot
 
 ## 4e) Results comparison
 
-> Now, let's compare the results from the 3 pipelines (voom-limma, edgeR and dearseq).
+> Finally let's make some visualisations to compare the results from the 3 pipelines (voom-limma, edgeR and dearseq).
 
 > First, use the `VennDiagram` package to visualise the agreement between the methods. 
 
@@ -1148,7 +1333,9 @@ message(paste0(
 ))
 ```
 
-> An alternative way to visualise agreement is with a so-called UpSet plot. This representation works well when the number of classes to compare is greater than 3, such that a Venn diagram becomes hard to view. Using the `UpSetR` package, make an UpSet diagram. Do our 3 pipelines have concordant results? 
+> **Answer**: 455 genes were identified by all three methods. In particular, edgeR identifies a large amount of distinct genes. 
+
+> An alternative way to visualise agreement is with a so-called UpSet plot. This representation works well when the number of classes to compare is greater than 3, such that a Venn diagram becomes hard to view. Using the `UpSetR` package, make an UpSet diagram. Do our 3 pipelines have concordant results? Make a conclusion about the sensitivity of the results to the choice of method. 
 
 ```{r}
 # Now for the UpSet diagram, make one list of DEGs
@@ -1187,3 +1374,4 @@ upset(
 )
 ```
 
+> **Answer**: Although some of the results contain many shared genes, there are also a significant amount which are unique to a given method, suggesting sensitivity of the results to the choice of method. It may be beneficial to apply multiple methods to the same data and compare the results. 
