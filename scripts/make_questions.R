@@ -15,6 +15,12 @@ library(here)
 placeholder <- c("```{r}", "# Your code here", "```")
 notice <- "<!-- This file is generated from the solutions file by scripts/make_questions.R : do not edit it directly. -->"
 
+# Lets the questions file be knitted before all the tasks are completed : errors from
+# the missing student code are shown in the output instead of stopping the knit
+knit_option <- c("```{r, include = FALSE}",
+                 "knitr::opts_chunk$set(error = TRUE)",
+                 "```")
+
 make_questions <- function(solutions_file) {
   lines <- readLines(solutions_file, encoding = "UTF-8", warn = FALSE)
   out <- character()
@@ -45,9 +51,9 @@ make_questions <- function(solutions_file) {
   # Insert the notice after the YAML header, if there is one
   if (out[1] == "---") {
     end_yaml <- which(out == "---")[2]
-    out <- append(out, c("", notice, ""), after = end_yaml)
+    out <- append(out, c("", notice, "", knit_option, ""), after = end_yaml)
   } else {
-    out <- c(notice, "", out)
+    out <- c(notice, "", knit_option, "", out)
   }
   out
 }
