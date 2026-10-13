@@ -315,35 +315,6 @@ london_raw$Gene_biotype %>%
 # Your code here
 ```
 
-```{r, include = FALSE}
-# Setup, not part of the tasks : creates `counts_protein_coding` if you have not created it
-if (!exists("counts_protein_coding")) {
-  # Total counts of each gene across all samples
-  gene_total_counts <- colSums(counts_raw)
-
-  # Unexpressed genes have no counts in any sample
-  unexpressed_genes <- colnames(counts_raw)[gene_total_counts == 0]
-
-  counts_expressed <- counts_raw %>%
-    dplyr::select(-all_of(unexpressed_genes))
-
-  message(length(unexpressed_genes), " unexpressed genes removed from the data.")
-
-  # Names of the non-protein-coding genes (we use the London data to find them)
-  non_protein_coding_genes <- london_raw %>%
-    filter(Gene_biotype != "protein_coding") %>%
-    pull(Genes)
-
-  counts_protein_coding <- counts_expressed %>%
-    dplyr::select(!any_of(non_protein_coding_genes))
-
-  message(
-    ncol(counts_expressed) - ncol(counts_protein_coding),
-    " non-protein-coding genes removed from the data."
-  )
-}
-```
-
 > Now that we have finished loading and merging the data, we can remove the unnecessary objects from the global environment with the `rm()` function. This is good practice with high-dimensional data, as memory can quickly be filled by large, unnecessary objects.
 
 ```{r}
@@ -479,23 +450,6 @@ counts_combat <- ComBat_seq(
 
 ```{r}
 # Your code here
-```
-
-```{r}
-# Your code here
-```
-
-```{r, include = FALSE}
-# Setup, not part of the tasks : creates `counts_combat_log2_cpm_tmm` if you have not created it
-if (!exists("counts_combat_log2_cpm_tmm")) {
-  # The corrected counts already have genes in rows
-  dge_combat <- DGEList(counts_combat) %>%
-    calcNormFactors(method = "TMM")
-
-  counts_combat_log2_cpm_tmm <- cpm(dge_combat, log = TRUE) %>%
-    t() %>%
-    as.data.frame()
-}
 ```
 
 > Since we have finished with the pre-processing, we can remove the unnecessary objects from the global environment again.

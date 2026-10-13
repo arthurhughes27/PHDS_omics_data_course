@@ -291,7 +291,7 @@ counts_metadata[, 1:8] %>%
 
 > How many genes do you remove with this step?
 
-<!-- solution:code provides=counts_protein_coding -->
+<!-- solution:code -->
 ```{r}
 # Total counts of each gene across all samples
 gene_total_counts <- colSums(counts_raw)
@@ -321,7 +321,7 @@ london_raw$Gene_biotype %>%
 
 > Using this information, filter the counts to only include genes that are protein-coding. How many genes were removed in this stage? Store the filtered counts in an object called `counts_protein_coding`, which is used in the following sections.
 
-<!-- solution:code provides=counts_protein_coding -->
+<!-- solution:code -->
 ```{r}
 # Names of the non-protein-coding genes (we use the London data to find them)
 non_protein_coding_genes <- london_raw %>%
@@ -341,8 +341,6 @@ message(
 <!-- solution:text -->
 > **Answer:** 32,221 genes were removed from the data.
 <!-- /solution -->
-
-<!-- checkpoint:counts_protein_coding -->
 
 > Now that we have finished loading and merging the data, we can remove the unnecessary objects from the global environment with the `rm()` function. This is good practice with high-dimensional data, as memory can quickly be filled by large, unnecessary objects.
 
@@ -565,7 +563,7 @@ counts_combat <- ComBat_seq(
 
 > Now that we have attempted to correct for the batch effect in the raw counts, use the previous code on this corrected matrix to normalise the data using log2-CPM-TMM. Then, visualise the data on the first two PCs, as before, and conclude whether a study effect remains in the data. Store the normalised counts in an object called `counts_combat_log2_cpm_tmm`, which is used in the following sections.
 
-<!-- solution:code provides=counts_combat_log2_cpm_tmm -->
+<!-- solution:code -->
 ```{r}
 # The corrected counts already have genes in rows
 dge_combat <- DGEList(counts_combat) %>%
@@ -574,11 +572,7 @@ dge_combat <- DGEList(counts_combat) %>%
 counts_combat_log2_cpm_tmm <- cpm(dge_combat, log = TRUE) %>%
   t() %>%
   as.data.frame()
-```
-<!-- /solution -->
 
-<!-- solution:code -->
-```{r}
 pca_combat <- prcomp(counts_combat_log2_cpm_tmm, center = TRUE, scale. = TRUE)
 pc_variance_combat <- summary(pca_combat)$importance["Proportion of Variance", ]
 
@@ -605,8 +599,6 @@ pca_combat_plot
 <!-- solution:text -->
 > **Answer:** The batch effect appears to have been mitigated.
 <!-- /solution -->
-
-<!-- checkpoint:counts_combat_log2_cpm_tmm -->
 
 > Since we have finished with the pre-processing, we can remove the unnecessary objects from the global environment again.
 
