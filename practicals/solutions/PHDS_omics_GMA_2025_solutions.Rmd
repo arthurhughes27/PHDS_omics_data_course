@@ -1,0 +1,1097 @@
+# Task Overview
+
+> We are going to re-analyse a dataset containing transcriptomic samples from healthy patients and patients infected with mycobacterium tuberculosis, which causes tuberculosis disease. This data has previously been analysed by [Singhania et al, 2018](https://www.nature.com/articles/s41467-018-04579-w). Tuberculosis is a heterogeneous disease with high global burden. Patients infected with mycobacterium tuberculosis can be classified as active or latent infections, depending on whether clinical symptoms are present or not. Diagnosing tuberculosis infection can be difficult, especially in asymptomatic patients with latent tuberculosis infection (LTBI). 
+
+> Therefore, it would be beneficial to identify some biomarkers which can act as sensitive and specific indicators of the disease state. The data is open-access and available through the National Center for Biotechnology Information's Gene Expression Omnibus project. Data were collected from three cohorts (the London, South Africa, and Leicester cohorts).
+
+>  The goal of this practical will be to perform an analysis of these data, using the principles learned in the lecture. Specifically, we will practice data pre-processing, normalisation, batch effect correction, data exploration with principal component analysis and hierarchical clustering, and differential gene expression analysis. 
+
+# Data Management
+
+## 0a) Install and Load Required Packages
+
+> Using `install.packages()`, install the following packages from the CRAN : BiocManager, readxl, dplyr, flashClust, UpSetR, tidyR, ggplot2, stringr, dendextend, ggdendro, ggrepel, VennDiagram, grid.
+
+> Using `BiocManager::install()`, install the following packages from `BioConductor` : GEOquery, edgeR, limma, pvca, dearseq, sva. 
+
+> The following chunk will check if you already have any of these packages and then install the missing ones.
+
+```{r, echo = F, results = 'hide', message = F}
+# This sets the options for the outputs when knitting the rmd file
+knitr::opts_chunk$set(warning = FALSE,
+                      message = TRUE,
+                      fig.width = 15,
+                      fig.height = 11)
+```
+
+
+```{r, eval = F, results = 'hide', message = FALSE, warning = FALSE}
+cran_packages <- c(
+  "BiocManager",
+  "readxl",
+  "dplyr",
+  "flashClust",
+  "UpSetR",
+  "tidyr",
+  "ggplot2",
+  "stringr",
+  "dendextend",
+  "ggdendro",
+  "ggrepel",
+  "VennDiagram",
+  "grid"
+)
+
+# Install missing CRAN packages
+install.packages(setdiff(cran_packages, installed.packages()[, "Package"]))
+
+# ---- BioConductor Packages ----
+bioc_packages <-
+  c("GEOquery", "edgeR", "limma", "pvca", "dearseq", "sva")
+
+# Load BiocManager and install missing Bioconductor packages
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install(setdiff(bioc_packages, installed.packages()[, "Package"]))
+```
+
+```{r, echo = F, results = 'hide', message = F}
+library(BiocManager)
+library(GEOquery)
+library(edgeR)
+library(limma)
+library(pvca)
+library(tidyr)
+library(readxl)
+library(dplyr)
+library(flashClust)
+library(UpSetR)
+library(ggplot2)
+library(stringr)
+library(dendextend)
+library(ggdendro)
+library(VennDiagram)
+library(grid)
+library(ggrepel)
+library(dearseq)
+library(sva)
+```
+
+> [Take the following link to the NCBI's gene expression omnibus](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE107995) for the series *A modular transcriptional signature identifies phenotypic heterogeneity of human tuberculosis infection*. Scroll down and click on the links to the following SubSeries : `GSE107991`, `GSE107992`, `GSE107993`. These SubSeries correspond to three different patient cohorts, called the London, South Africa, and Leicester cohorts, respectively. On each of these pages, download the corresponding raw count data (i.e. 'GSE107991_Raw_counts_Berry_London.xlsx', 'GSE107992_Raw_counts_Berry_SouthAfrica.xlsx', and 'GSE107993_Raw_counts_Leicester_non_progressor_longitudnal_only.xlsx'), saving them in a single directory.
+
+> In this first step, I will give you the code to load the data and merge it together to make it easier to work with. Simply change the path directing to where the data were saved. 
+
+## 0b) Load data
+
+> First, change the line below to specify the path where you saved your data. 
+
+```{r, include = F}
+data_path = "C:/Users/arthu/Documents/Work/Teaching/M2 PHDS Final Resources/omics 2025/practicals/data/"
+```
+
+```{r, eval = F}
+data_path = "your/path/to/data/"
+```
+
+> Load the raw counts data with the `read_excel()` function. 
+
+```{r, message = F}
+# Read the raw counts for the London data
+london_raw <-
+  read_excel(paste0(data_path, "GSE107991_Raw_counts_Berry_London.xlsx"))
+
+# Read the raw counts for the South Africa data
+southafrica_raw <-
+  read_excel(paste0(data_path, "GSE107992_Raw_counts_Berry_SouthAfrica.xlsx"))
+
+# Read the raw counts for the Leicester data
+leicester_raw <-
+  read_excel(
+    paste0(
+      data_path,
+      "GSE107993_Raw_counts_Leicester_non_progressor_longitudnal_only.xlsx"
+    )
+  )
+```
+
+## 0c) Download metadata
+
+> Use the `GEOquery()` function to download the metadata corresponding to these files. 
+
+```{r, results = 'hide', message = F}
+# Load the metadata for the London, South Africa, and Leicester datasets
+london_metadata <-
+  GEOquery::getGEO("GSE107991", GSEMatrix = FALSE)  #London
+southafrica_metadata <-
+  GEOquery::getGEO("GSE107992", GSEMatrix = FALSE)  # SouthAfrica
+leicester_metadata <-
+  GEOquery::getGEO("GSE107993", GSEMatrix = FALSE)  #Leicester
+```
+
+## 0d) Process the metadata
+> Extract relevant information from the metadata.
+
+```{r}
+# This function extracts the relevant columns from the metadata files and changes some of the names of the values
+get_info <- function(i, meta) {
+  name <- meta@gsms[[i]]@header$source_name_ch1
+  name <- gsub("Active_TB", "ActiveTB", name)
+  name <- gsub("Test_set", "TestSet", name)
+  name <- gsub("Validation_set", "ValidationSet", name)
+  name <- gsub("Non_progressor", "NonProgressor", name)
+  res <- unlist(strsplit(name, split = "_"))
+  res <- c(res, meta@gsms[[i]]@header$title)
+  res
+}
+
+infos_london <-
+  sapply(1:length(london_metadata@gsms),
+         FUN = get_info,
+         meta = london_metadata)
+infos_df_london <-
+  cbind.data.frame(GSMID = names(london_metadata@gsms),
+                   t(infos_london))
+rownames(infos_df_london) <- names(london_metadata@gsms)
+colnames(infos_df_london)[-1] <-
+  c("Cohort", "Location", "Set", "Status", "SampleName")
+
+infos_southafrica <-
+  sapply(1:length(southafrica_metadata@gsms),
+         FUN = get_info,
+         meta = southafrica_metadata)
+infos_df_southafrica <-
+  cbind.data.frame(GSMID = names(southafrica_metadata@gsms),
+                   t(infos_southafrica))
+rownames(infos_df_southafrica) <- names(southafrica_metadata@gsms)
+colnames(infos_df_southafrica)[-1] <-
+  c("Cohort", "Location", "Set", "Status", "SampleName")
+
+infos_leicester <-
+  sapply(1:length(leicester_metadata@gsms),
+         FUN = get_info,
+         meta = leicester_metadata)
+infos_df_leicester <-
+  cbind.data.frame(GSMID = names(leicester_metadata@gsms),
+                   t(infos_leicester))
+rownames(infos_df_leicester) <- names(leicester_metadata@gsms)
+colnames(infos_df_leicester)[-1] <-
+  c("Cohort", "Location", "Status", "Set",
+    "SampleName")
+infos_df_leicester <- infos_df_leicester[, c(1, 2, 3, 5, 4, 6)]
+```
+
+## 0e) Merge data
+
+> Change the format to wide, so each column is a gene, and merge the data.
+
+```{r}
+# Bind the metadata for London, SA, and Leicester together
+infos_all <-
+  rbind.data.frame(infos_df_london, infos_df_southafrica, infos_df_leicester)
+
+# Bind the counts for London, SA, and Leicester together
+counts_merged <-
+  merge(
+    x = merge(x = london_raw, y = southafrica_raw, by = c(1:3)),
+    y = leicester_raw,
+    by = c(1:3)
+  ) %>% select(-Gene_name, -Gene_biotype)
+
+# pivot to wide format
+counts_all <- t(counts_merged)[-1,] %>% as.data.frame()
+
+# Columns are genes
+colnames(counts_all) = counts_merged$Genes
+
+# Rows are samples
+rownames(counts_all) = 1:dim(counts_all)[1]
+
+# Now we merge the counts with the metadata by the sample name
+merged_all = merge(
+  y = bind_cols("SampleName" = colnames(counts_merged)[-1], counts_all),
+  x = infos_all,
+  by = "SampleName"
+) %>% distinct()
+
+# here we extract the counts and store them as numeric values in the dataframe
+counts_all = merged_all %>% select(-c(1:6)) %>% sapply(as.numeric) %>% as.data.frame()
+
+# Here we extract the metadata
+metadata_all = merged_all %>% select(c(1:6))
+
+# Visualise the start of the merged dataframe
+merged_all[, c(1:8)] %>% head(5)
+```
+
+# 1) Data pre-processing
+
+## 1a) Remove unexpressed genes
+
+> Counts matrices usually contain some completely uninformative variables (i.e. with 0 counts in every sample). Remove these from the data and report how many columns were removed. 
+
+```{r}
+# Extract the total counts for each gene
+count_sums <- colSums(counts_all)
+
+# Unexpressed genes are those without a single count across samples
+unexpressed_genes = colnames(counts_all)[count_sums == 0]
+
+# Remove these from the data
+counts_all_filtered = counts_all %>% 
+  select(-all_of(unexpressed_genes))
+
+# how many genes were removed?
+message(paste0(
+  unexpressed_genes %>% length(),
+  " unexpressed genes removed from the data."
+))
+```
+
+## 1b) Remove non-protein coding genes
+
+> Many investigators only include protein-coding genes in their analysis. Information on whether a gene is protein coding or not may be found in the raw counts under the Gene_biotype columns. For example, 
+
+```{r}
+london_raw$Gene_biotype %>% head()
+```
+
+> Using this information, filter the counts to only include genes who are protein-coding. Report the amount of genes removed at this stage. 
+
+```{r}
+# Use the london data to extract the names of the protein-coding genes
+non_protein_coding_genes = london_raw %>%
+  filter(Gene_biotype != "protein_coding") %>%
+  pull(Genes)
+
+# De-select non-protein-coding genes from the counts matrix
+counts_all_filtered_proteincoding = counts_all_filtered %>%
+  select(!any_of(non_protein_coding_genes))
+
+# how many genes were removed?
+message(paste0(
+  intersect(non_protein_coding_genes, colnames(counts_all_filtered)) %>% length(),
+  " non-protein-coding genes removed from the data."
+))
+```
+
+> Now we are finished with the data loading and merging, we may remove all of the unnecessary data from the global environment using the `rm()` function. This is good practice when using high-dimensional data, as memory can quickly be occupied by large, unnecessary files in the global environment. 
+
+```{r}
+# Here we list the objects to keep
+keep <-
+  c("metadata_all",
+    "counts_all_filtered_proteincoding",
+    "data_path")
+
+# Remove everything else from the global environment
+rm(list = setdiff(ls(), keep))
+
+# Garbage collection to clear unused memory
+gc()
+```
+
+# 2) Normalisation 
+
+> Normalisation is a crucial step in RNA-seq analysis to ensure that samples are comparable. An important point here is that our data comes from 3 different studies (London, SA, and Leicester). Let's investigate the impact of this study variable on the data. 
+
+## 2a) Investigate study effects
+
+> The library size of a sample is the total number of counts across all genes. Compute the library sizes and visualise them on a bar chart using `ggplot2`. Colour the samples by the study from which it came. What do you notice? 
+
+```{r}
+# Create a new dataframe to store the library sizes, the sample identifier, and the study name
+library_sizes <-
+  bind_cols(
+    "library_size" = counts_all_filtered_proteincoding %>% rowSums(),
+    "SampleNameShort" = metadata_all$SampleName,
+    "Location" = metadata_all$Location
+  ) %>% as.data.frame()
+
+# Use ggplot to visualise these as a bar chart coloured by study
+ggplot(library_sizes,
+       aes(x = SampleNameShort, y = library_size, fill = Location)) +
+  geom_col() +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  labs(x = "Sample", y = "Library Size", fill = "Location") +
+  ggtitle("Library Sizes by Sample and Location")
+```
+
+> There are differences both between individuals and between studies in terms of sample size. Therefore, these samples are not comparable without normalisation. 
+
+## 2b) Log2-CPM normalisation
+
+> A simple way to address the library size problem is simply to normalise the raw integer counts by dividing by the library size. The variant of this approach which is often used is a transformation called *counts-per-million*. This is calculated by first dividing each count by its sample's library size, then multiplying by a million. 
+
+> Using the `cpm()` (counts-per-million) function from the `edgeR` with the `log = TRUE` argument, compute the log2-CPM of these data. 
+
+> Principal component analysis is a useful tool for representing the data in a lower-dimensional space while preserving signals which contribute to between-sample variability. Perform a PCA using the `prcomp()` function. Plot the samples on the first two principal components, coloured by location. Has this normalisation step removed the study-effect?
+
+```{r}
+# Make a DGEList object with the raw counts
+dge <- DGEList(t(counts_all_filtered_proteincoding))
+
+# Convert the raw counts into Log2-CPM-TMM
+counts_log2_cpm_tmm <-
+  cpm(dge, log = TRUE) %>% t() %>% as.data.frame()
+
+# Perform PCA on the cpm counts
+pca_res <-
+  prcomp(counts_log2_cpm_tmm,
+         center = TRUE,
+         scale. = TRUE)
+
+# Extract PC1 and PC2 for plotting
+pca_df <- data.frame(
+  PC1 = pca_res$x[, 1],
+  PC2 = pca_res$x[, 2],
+  Location = metadata_all$Location,
+  Sample = metadata_all$SampleName
+)
+
+# Plot PC1 and PC2, colour points by location
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Location)) +
+  geom_point(size = 3, alpha = 0.5) +
+  theme_minimal(base_size = 20) +
+  labs(
+    x = paste0("PC1 (", round(summary(pca_res)$importance[2, 1] * 100, 1), "%)"),
+    y = paste0("PC2 (", round(summary(pca_res)$importance[2, 2] * 100, 1), "%)"),
+    color = "Location",
+    title = "PCA of log2-CPM-transformed data"
+  )
+```
+
+## 2c) Log2-CPM-TMM Normalisation
+
+> Another typical normalisation approach is to use the *trimmed mean of moments* (TMM) method. Calculate the normalisation factors on the raw counts data using the `calcNormFactors()` function in `edgeR` with the argument `method = "TMM"`applied to a `DGEList()` object. Then, convert this object into log2CPM using the `cpm()` function as before. Using your previous code, plot the points on the first two principal components, coloured by location. Has this normalisation step solved the problem?
+
+```{r}
+# Make a DGEList object with the raw counts
+dge_list <- DGEList(t(counts_all_filtered_proteincoding))
+
+# Calculate the normalisation factors with TMM
+dge <- calcNormFactors(dge_list, method = "TMM")
+
+# Convert the raw counts into Log2-CPM-TMM
+counts_log2_cpm_tmm <-
+  cpm(dge, log = TRUE) %>% t() %>% as.data.frame()
+
+# Perform PCA on the cpm counts
+pca_res <-
+  prcomp(counts_log2_cpm_tmm,
+         center = TRUE,
+         scale. = TRUE)
+
+# Extract PC1 and PC2 for plotting
+pca_df <- data.frame(
+  PC1 = pca_res$x[, 1],
+  PC2 = pca_res$x[, 2],
+  Location = metadata_all$Location,
+  Sample = metadata_all$SampleName
+)
+
+# Plot PC1 and PC2, colour points by location
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Location)) +
+  geom_point(size = 3, alpha = 0.5) +
+  theme_minimal(base_size = 20) +
+  labs(
+    x = paste0("PC1 (", round(summary(pca_res)$importance[2, 1] * 100, 1), "%)"),
+    y = paste0("PC2 (", round(summary(pca_res)$importance[2, 2] * 100, 1), "%)"),
+    color = "Location",
+    title = "PCA of log2-CPM-TMM-transformed data"
+  )
+```
+
+## 2d) Batch effect correction
+
+> Even after normalisation, we appear to still have a study-effect. We could view the study as a batch variable, since we do not expect it to contribute much to the heterogeneity between samples. To correct for batch effects in RNA-seq data, we can use the *combat-seq* method. We do this using the `ComBat_seq()` function from the `sva` package. 
+
+> In this method, we must specify two things. Firstly, the batch variable (`Location`), and secondly, a variable whose effects we want to remain intact after correction (in this case, the `Status` variable, which provides information on the disease states of the patients). Apply `ComBat_seq()` to the raw, filtered counts to correct for the `batch = Location`, while keeping preserved effects from `group = metadata_all$Status`. NB : running combat-seq may take a couple of minutes. 
+
+```{r}
+# Run ComBat-Seq
+counts_combat <-
+  ComBat_seq(
+    counts = t(counts_all_filtered_proteincoding),
+    batch = metadata_all$Location,
+    group = metadata_all$Status
+  )
+```
+
+> Now that we have attempted to correct for the batch effect in the raw counts, use your previous code to normalise the data using Log2-CPM-TMM. Now visualise the data on the first two principal components and conlcude if there still remains a study effect in the data. 
+
+```{r}
+# Make a DGEList object with the raw counts
+dge_list <- DGEList(counts_combat)
+
+# Calculate the normalisation factors with TMM
+dge <- calcNormFactors(dge_list, method = "TMM")
+
+# Convert the raw counts into Log2-CPM-TMM
+counts_combat_log2_cpm_tmm <-
+  cpm(dge, log = TRUE) %>% t() %>% as.data.frame()
+
+# Perform PCA on the cpm counts
+pca_res <-
+  prcomp(counts_combat_log2_cpm_tmm,
+         center = TRUE,
+         scale. = TRUE)
+
+# Extract PC1 and PC2 for plotting
+pca_df <- data.frame(
+  PC1 = pca_res$x[, 1],
+  PC2 = pca_res$x[, 2],
+  Location = metadata_all$Location,
+  Sample = metadata_all$SampleName
+)
+
+# Plot PC1 and PC2, colour points by location
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Location)) +
+  geom_point(size = 3, alpha = 0.5) +
+  theme_minimal(base_size = 20) +
+  labs(
+    x = paste0("PC1 (", round(summary(pca_res)$importance[2, 1] * 100, 1), "%)"),
+    y = paste0("PC2 (", round(summary(pca_res)$importance[2, 2] * 100, 1), "%)"),
+    color = "Location",
+    title = "PCA of batch corrected, log2-CPM-transformed data"
+  )
+```
+
+> Since we have finished with the pre-processing, here we can remove all useless data from the global environment. 
+
+```{r}
+# Here we list the objects to keep
+keep <-
+  c("metadata_all",
+    "counts_combat_log2_cpm_tmm",
+    "counts_combat",
+    "data_path")
+
+# Remove everything else from the global environment
+rm(list = setdiff(ls(), keep))
+
+# Garbage collection to clear unused memory
+gc()
+```
+
+# 3) Data Exploration
+
+> Now that we have preprocessed the data and (hopefully) removed any batch effects, we can start to explore it. The goal is to use tools like PCA and hierarchical clustering to explore any obvious signals in the data related to the patient status. 
+
+## 3a) Principal Component Analysis 
+
+> Perform a PCA to explore whether the variability in the gene expression data can be explained by the disease status of patients. Like before, perform a PCA on the batch-corrected-Log2-CPM-TMM-normalised data and plot the data on the first two PCs. However, this time, colour the points by their disease status. What does this suggest? 
+
+```{r}
+# Perform PCA on the cpm counts
+pca_res <-
+  prcomp(counts_combat_log2_cpm_tmm,
+         center = TRUE,
+         scale. = TRUE)
+
+# Extract PC1 and PC2 for plotting
+pca_df <- data.frame(
+  PC1 = pca_res$x[, 1],
+  PC2 = pca_res$x[, 2],
+  Status = metadata_all$Status,
+  Sample = metadata_all$SampleName
+)
+
+# Plot PC1 and PC2, colour points by Status
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Status)) +
+  geom_point(size = 3, alpha = 0.5) +
+  theme_minimal(base_size = 20) +
+  labs(
+    x = paste0("PC1 (", round(summary(pca_res)$importance[2, 1] * 100, 1), "%)"),
+    y = paste0("PC2 (", round(summary(pca_res)$importance[2, 2] * 100, 1), "%)"),
+    color = "Status",
+    title = "PCA of raw counts"
+  )
+```
+
+## 3b) Hierarchical clustering
+
+> In addition, we can explore signal in the data using hierachical clustering algorithms. Here, the goal is to determine which samples are similar and which are different. If these similarities and/or differences can be explained by the disease state, it suggests a signal might be present. 
+
+> Using the `hclust()` function from the `flashClust` package, perform an agglomerative hierarchical clustering algorithm on the gene expression with *Euclidean distance* and *complete linkage*. Compute the resulting dendrogram with the `as.dendrogram()` function. Find a way to colour the sample labels by the `Status` variable. 
+
+> Do you notice any patterns? Is there any obvious way to determine the number of clusters in this case?
+
+```{r}
+# Extract the sample names
+sample_names <- metadata_all$SampleName
+
+# Extract the disease states
+Status <- metadata_all$Status
+
+# Perform hierarchical clustering
+# Compute the Euclidean distance matrix
+distance_matrix <-
+  dist(counts_combat_log2_cpm_tmm, method = "euclidean")
+
+# Perform complete linkage hierarchical clustering with hclust()
+hclust_result <- hclust(distance_matrix, method = "complete")
+
+# Compute the dendrogram
+dend <- as.dendrogram(hclust_result)
+
+# Compute the ordering of the sample labels
+dend_labels_order <- order.dendrogram(dend)
+
+# Reorder sample names and Status according to the dendrogram order
+ordered_sample_names <- sample_names[dend_labels_order]
+ordered_Status <- Status[dend_labels_order]
+
+# Set the labels of the dendrogram to the ordered sample names
+labels(dend) <- ordered_sample_names
+
+# Convert dendrogram to a format suitable for ggplot2
+dend_data <- dendro_data(dend)
+
+label_data <- data.frame(label = ordered_sample_names,
+                         Status = ordered_Status,
+                         x = dend_data$labels$x)
+
+# Create the dendrogram plot with ggplot2, ensuring proper label order
+ggplot() +
+  geom_segment(data = dend_data$segments, aes(
+    x = x,
+    y = y,
+    xend = xend,
+    yend = yend
+  )) +
+  geom_text(
+    data = label_data,
+    aes(
+      x = x,
+      y = 0,
+      label = label,
+      color = Status
+    ),
+    hjust = 1,
+    vjust = 0.5,
+    angle = 90,
+    size = 3
+  ) +
+  theme_minimal(base_size = 20) +
+  scale_color_manual(values = c("blue", "red", "green", "orange", "purple")) +  # Customize as needed
+  labs(title = "Hierarchical Clustering Dendrogram of Gene Expression Data, Coloured by Disease State", x = "Samples", y = "Height") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+```
+
+> Try changing the `method` argument in the `hclust()` call to `method = "ward"`. Use your previous code to plot the dendrogram as before. A criterion to select the number of clusters which often accompanies the ward method is to select the number of clusters such that the next jump in the tree is the greatest. How many clusters would you choose with this criterion? What is your conclusion now?
+
+```{r}
+# Extract the sample names
+sample_names <- metadata_all$SampleName
+
+# Extract the disease states
+Status <- metadata_all$Status
+
+# Perform hierarchical clustering
+# Compute the Euclidean distance matrix
+distance_matrix <-
+  dist(counts_combat_log2_cpm_tmm, method = "euclidean")
+
+# Perform complete linkage hierarchical clustering with hclust()
+hclust_result <- hclust(distance_matrix, method = "ward")
+
+# Compute the dendrogram
+dend <- as.dendrogram(hclust_result)
+
+# Compute the ordering of the sample labels
+dend_labels_order <- order.dendrogram(dend)
+
+# Reorder sample names and Status according to the dendrogram order
+ordered_sample_names <- sample_names[dend_labels_order]
+ordered_Status <- Status[dend_labels_order]
+
+# Set the labels of the dendrogram to the ordered sample names
+labels(dend) <- ordered_sample_names
+
+# Convert dendrogram to a format suitable for ggplot2
+dend_data <- dendro_data(dend)
+
+label_data <- data.frame(label = ordered_sample_names,
+                         Status = ordered_Status,
+                         x = dend_data$labels$x)
+
+# Create the dendrogram plot with ggplot2, ensuring proper label order
+ggplot() +
+  geom_segment(data = dend_data$segments, aes(
+    x = x,
+    y = y,
+    xend = xend,
+    yend = yend
+  )) +
+  geom_text(
+    data = label_data,
+    aes(
+      x = x,
+      y = 0,
+      label = label,
+      color = Status
+    ),
+    hjust = 1,
+    vjust = 0.5,
+    angle = 90,
+    size = 3
+  ) +
+  theme_minimal(base_size = 20) +
+  scale_color_manual(values = c("blue", "red", "green", "orange", "purple")) +  # Customize as needed
+  labs(title = "Hierarchical Clustering Dendrogram of Gene Expression Data, Coloured by Disease State", x = "Samples", y = "Height") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+```
+
+Now clear the enrivonment of useless data again. 
+```{r}
+# Here we list the objects to keep
+keep <-
+  c("metadata_all",
+    "counts_combat_log2_cpm_tmm",
+    "counts_combat",
+    "data_path")
+
+# Remove everything else from the global environment
+rm(list = setdiff(ls(), keep))
+
+# Garbage collection to clear unused memory
+gc()
+```
+
+# 4) Differential Gene Expression Analysis
+
+> We are interested in identifying any genes whose expression is different between different disease states. For the purposes of this exercise, we will group together control and latent tuberculosis patients together, and compare them to the active infection group. We will use multiple methods to do this, and compare their results at the end. 
+
+## 4a) EdgeR
+
+> We will be following the edgeR pipeline, [found here](https://www.bioconductor.org/packages//2.11/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf).
+
+> edgeR starts with raw integer counts. We can use the counts from ComBat-Seq (prior to normalisation). Starting from a DGEList object, follow the edgeR pipeline. This starts with estimating TMM normalisation factors with `calcNormFactors()`. Then, we estimate common dispersion factors using `estimateCommonDisp()`. The negative binomial model can be fit with `glmQLFit()`. P-values can be extracted with `glmQLFTest()`, and the top genes can be extracted using the `topTags()` function. 
+
+> Extract a vector of gene names which have adjusted p-value < 0.05, as well as |log2-Fold-Change > 1|.
+
+```{r}
+# Define a new column testGroup which groups together LTBI and control patients into one control group
+metadata_all = metadata_all %>%
+  mutate(testGroup = recode_factor(Status, "LTBI" = "Control")) %>%
+  relocate(testGroup, .after = Status)
+
+# Define a DGEList object with the ComBat-Seq corrected counts
+dge <-
+  DGEList(counts = counts_combat,
+          group = metadata_all$testGroup)
+
+# Calculate normalisation factors with TMM
+dge <- calcNormFactors(dge, method = "TMM")
+
+# Specify a design matrix
+design <- model.matrix(~ testGroup, data = metadata_all)
+
+# Estimate common dispersion factors
+dge_edgeR_common <- estimateCommonDisp(dge, design)
+
+# Fit the quasi-likelihood GLM
+fit_edgeR <- glmQLFit(dge_edgeR_common, design)
+
+# Perform the test (coef = 2 compares ActiveTB to control)
+qlf <- glmQLFTest(fit_edgeR, coef = 2)
+
+# Store results in a dataframe and store significant gene names
+results_edgeR <- topTags(qlf, n = Inf) %>% as.data.frame()
+
+genelist_edgeR <- results_edgeR %>%
+  filter(FDR < 0.05, abs(logFC) > 1) %>%
+  rownames()
+
+# How many genes were significantly differentially expressed?
+message(paste0(
+  genelist_edgeR %>% length(),
+  " differentially expressed genes found."
+))
+```
+
+> Repeat the previous experiment, but instead of estimating a common dispersion factor, estimate one for each gene using the `estimateDisp()` function. Do the results change significantly?. 
+
+```{r}
+dge_edgeR_genewise <- estimateDisp(dge, design)
+
+# Fit the quasi-likelihood GLM
+fit_edgeR_genewise <- glmQLFit(dge_edgeR_genewise, design)
+
+# Perform the test (coef = 2 compares ActiveTB to control)
+qlf_genewise <- glmQLFTest(fit_edgeR_genewise, coef = 2)
+
+# Store results in a dataframe and store significant gene names
+results_edgeR_genewise <-
+  topTags(qlf_genewise, n = Inf) %>% as.data.frame()
+
+genelist_edgeR_genewise <- results_edgeR_genewise %>%
+  filter(FDR < 0.05, abs(logFC) > 1) %>%
+  rownames()
+
+# How many genes were significantly differentially expressed?
+message(paste0(
+  genelist_edgeR_genewise %>% length(),
+  " differentially expressed genes found."
+))
+
+# How many significant genes were shared when estimating common vs gene-wise dispersion parameters?
+message(
+  intersect(genelist_edgeR_genewise, genelist_edgeR) %>% length(),
+  " commonly differentially expressed genes found between the two methods."
+)
+```
+
+## 4b) Voom-Limma
+
+> Now, we will perform the same task using voom-limma. A tutorial can be [found here](https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/thursday/DE.html).
+
+> Following the guide, apply the Voom-limma pipeline with the functions `voom()`, `lmFit()`, `eBayes()` and `decideTests()`. The output should be a vector giving the names of the differentially expressed genes defined by adjusted p-value < 0.05 and |log2-Fold-Change > 1|.
+
+```{r}
+dge <-
+  DGEList(counts = counts_combat,
+          group = metadata_all$testGroup)
+
+# Calculate normalisation factors with TMM
+dge <- calcNormFactors(dge, method = "TMM")
+
+# Specify a design matrix
+design <- model.matrix( ~ testGroup, data = metadata_all)
+
+# Use the voom() function to estimate the mean-variance relationship
+v <- voom(dge, design, plot = TRUE)
+
+# Fit the linear models to the data
+fit_voom <- lmFit(v, design)
+
+# Perform empirical Bayes tests
+fit_voom <- eBayes(fit_voom, robust = TRUE)
+
+# Determine significance of tests
+voomlimma_signif <-
+  decideTests(fit_voom,
+              adjust.method = "BH",
+              p.value = 0.05,
+              lfc = 1)
+summary(voomlimma_signif)
+
+# Put the results in a dataframe and find significant gene names
+results_voom = topTable(fit_voom, coef = 2, n = Inf) %>% as.data.frame()
+
+genelist_voomlimma = results_voom %>% filter(adj.P.Val < 0.05, abs(logFC) > 1) %>% rownames()
+
+# How many genes were significantly differentially expressed?
+genelist_voomlimma %>% length()
+```
+
+## 4c) dearseq
+
+> Finally we will apply the dearseq pipeline. A guide can be [found here](https://www.bioconductor.org/packages/release/bioc/vignettes/dearseq/inst/doc/dearseqUserguide.html).
+
+> Use the `dear_seq()` function to perform differential expression analysis. Since log2-fold-change values are not directly available from the dearseq package, you may use the ones calculated by `edgeR`. 
+
+```{r}
+res_dearseq <-
+  dear_seq(
+    exprmat = as.matrix(t(counts_combat_log2_cpm_tmm)),
+    variables2test = design[, "testGroupActiveTB", drop = FALSE],
+    covariates = design[, "(Intercept)", drop = FALSE],
+    which_test = "asymptotic",
+    preprocessed = TRUE
+  )
+
+# Extract the log2FC from the edgeR analysis
+logFC <- fit_edgeR$coefficients[, 2]
+
+# Compute significantly DE genes
+dearseq_signif <- res_dearseq$pvals$adjPval < 0.05 & logFC > 1
+
+genelist_dearseq <- names(dearseq_signif[dearseq_signif == TRUE])
+
+# how many differentially expressed genes?
+genelist_dearseq %>% length()
+```
+
+## 4d) Volcano plot
+
+> A common representation of the results of DGEA is in the form of a so-called [*volcano plot*](https://olvtools.com/en/rnaseq/help/volcano-plot). The x-axis of a volcano plot is the log2FC value and the y-axis is the adjusted p-values on the log10 scale, with the axis inverted such that smaller p-values are greater on the y-axis. Typically, the ad-hoc limits which define differential expression (e.g. adjusted p-value < 0.05 and log2FC > 1 in our case) are represented by lines on the plot. Significantly up-regulated genes are coloured as red and significantly down-regulated genes as blue. Sometimes, the few most significant genes are given labels showing their name. 
+
+> Choose one of your analysis pipelines, and make a volcano plot to represent the results. Annotate the top 10 most significantly differentially expressed genes (by adjusted p-value) on the plot. 
+
+```{r}
+# EdgeR volcano plot
+volcano_results = results_edgeR %>% mutate(gene_name = rownames(results_edgeR)) %>% select(gene_name, FDR, logFC)
+
+volcano_results <- volcano_results %>%
+  mutate(
+    expression = case_when(
+      FDR < 0.05 & logFC > 1 ~ "Up-regulated",
+      FDR < 0.05 & logFC < -1 ~ "Down-regulated",
+      TRUE ~ "Not significant"
+    )
+  )
+
+top_10_genes <- volcano_results %>%
+  filter(logFC > 1) %>%
+  arrange(FDR) %>%
+  head(10)
+
+volcano_plot <-
+  volcano_results %>% ggplot(aes(
+    x = logFC,
+    y = -log10(FDR),
+    color = expression
+  )) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  scale_color_manual(values = c(
+    "Up-regulated" = "red",
+    "Down-regulated" = "blue",
+    "Not significant" = "grey"
+  )) +
+  geom_vline(
+    xintercept = c(-1, 1),
+    linetype = "dashed",
+    color = "black"
+  ) +
+  geom_hline(
+    yintercept = -log10(0.05),
+    linetype = "dashed",
+    color = "black"
+  ) +
+  labs(
+    title = "Volcano Plot of Differential Gene Expression",
+    x = "log2 Fold Change",
+    y = "-log10 Adjusted P-value",
+    color = "Expression"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right",
+        plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# Add gene name annotations for top 10 genes
+volcano_plot <- volcano_plot +
+  geom_text_repel(
+    data = top_10_genes,
+    aes(label = gene_name),
+    size = 3,
+    box.padding = 0.5,
+    point.padding = 0.5,
+    force = 10,
+    segment.color = "grey50"
+  )
+
+volcano_plot
+```
+
+```{r}
+# Voom volcano plot
+volcano_results = results_voom %>% mutate(gene_name = rownames(results_voom)) %>% select(gene_name, adj.P.Val, logFC)
+
+volcano_results <- volcano_results %>%
+  mutate(
+    expression = case_when(
+      adj.P.Val < 0.05 & logFC > 1 ~ "Up-regulated",
+      adj.P.Val < 0.05 & logFC < -1 ~ "Down-regulated",
+      TRUE ~ "Not significant"
+    )
+  )
+
+top_10_genes <- volcano_results %>%
+  filter(logFC > 1) %>%
+  arrange(adj.P.Val) %>%
+  head(10)
+
+volcano_plot <-
+  volcano_results %>% ggplot(aes(
+    x = logFC,
+    y = -log10(adj.P.Val),
+    color = expression
+  )) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  scale_color_manual(values = c(
+    "Up-regulated" = "red",
+    "Down-regulated" = "blue",
+    "Not significant" = "grey"
+  )) +
+  geom_vline(
+    xintercept = c(-1, 1),
+    linetype = "dashed",
+    color = "black"
+  ) +
+  geom_hline(
+    yintercept = -log10(0.05),
+    linetype = "dashed",
+    color = "black"
+  ) +
+  labs(
+    title = "Volcano Plot of Differential Gene Expression",
+    x = "log2 Fold Change",
+    y = "-log10 Adjusted P-value",
+    color = "Expression"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right",
+        plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# Add gene name annotations for top 10 genes
+volcano_plot <- volcano_plot +
+  geom_text_repel(
+    data = top_10_genes,
+    aes(label = gene_name),
+    size = 3,
+    box.padding = 0.5,
+    point.padding = 0.5,
+    force = 10,
+    segment.color = "grey50"
+  )
+
+volcano_plot
+```
+
+```{r}
+# dearseq volcano plot
+results_dearseq = data.frame("adjPval" = res_dearseq$pvals$adjPval,
+                             "logFC" = fit_edgeR$coefficients[, 2])
+
+volcano_results = results_dearseq %>% mutate(gene_name = rownames(results_dearseq)) %>% select(gene_name, adjPval, logFC)
+
+volcano_results <- volcano_results %>%
+  mutate(
+    expression = case_when(
+      adjPval < 0.05 & logFC > 1 ~ "Up-regulated",
+      adjPval < 0.05 & logFC < -1 ~ "Down-regulated",
+      TRUE ~ "Not significant"
+    )
+  )
+
+top_10_genes <- volcano_results %>%
+  filter(logFC > 1) %>%
+  arrange(adjPval) %>%
+  head(10)
+
+volcano_plot <-
+  volcano_results %>% ggplot(aes(
+    x = logFC,
+    y = -log10(adjPval),
+    color = expression
+  )) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  scale_color_manual(values = c(
+    "Up-regulated" = "red",
+    "Down-regulated" = "blue",
+    "Not significant" = "grey"
+  )) +
+  geom_vline(
+    xintercept = c(-1, 1),
+    linetype = "dashed",
+    color = "black"
+  ) +
+  geom_hline(
+    yintercept = -log10(0.05),
+    linetype = "dashed",
+    color = "black"
+  ) +
+  labs(
+    title = "Volcano Plot of Differential Gene Expression",
+    x = "log2 Fold Change",
+    y = "-log10 Adjusted P-value",
+    color = "Expression"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right",
+        plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# Add gene name annotations for top 10 genes
+volcano_plot <- volcano_plot +
+  geom_text_repel(
+    data = top_10_genes,
+    aes(label = gene_name),
+    size = 3,
+    box.padding = 0.5,
+    point.padding = 0.5,
+    force = 10,
+    segment.color = "grey50"
+  )
+
+volcano_plot
+```
+
+## 4e) Results comparison
+
+> Now, let's compare the results from the 3 pipelines (voom-limma, edgeR and dearseq).
+
+> First, use the `VennDiagram` package to visualise the agreement between the methods. 
+
+```{r}
+# Create a Venn Diagram
+venn.plot <- venn.diagram(
+  x = list(
+    Voomlimma = genelist_voomlimma,
+    EdgeR = genelist_edgeR,
+    dearseq = genelist_dearseq
+  ),
+  category.names = c("Voom-Limma", "EdgeR", "dearseq"),
+  filename = NULL,
+  output = TRUE,
+  fill = c("red", "blue", "green"),
+  # Set colors for each set
+  alpha = 0.5,
+  # Set transparency of the fills
+  lwd = 2,
+  # Set line width of the circles
+  col = "black",
+  # Set line color for the circles
+  cex = 2,
+  # Adjust text size
+  fontface = "bold",
+  # Make text bold
+  fontfamily = "sans"
+)
+
+# plot the Venn diagram in a new page
+grid.newpage()  # Ensure the plot starts fresh
+grid.draw(venn.plot)
+```
+
+> An alternative way to visualise agreement is with a so-called UpSet plot. This representation works well when the number of classes to compare is greater than 3, such that a Venn diagram becomes hard to view. Using the `UpSetR` package, make an UpSet diagram. Do our 3 pipelines have concordant results? 
+
+```{r}
+# Now for the UpSet diagram, make one list of DEGs
+gene_lists <- list(dearseq = genelist_dearseq,
+                   voom = genelist_voomlimma,
+                   edgeR = genelist_edgeR)
+
+# Get all unique genes across the three lists
+all_genes <-
+  unique(c(genelist_dearseq, genelist_voomlimma, genelist_edgeR))
+
+# Create a binary matrix to indicate the presence of each gene in each list
+upset_data <- data.frame(
+  dearseq = as.numeric(all_genes %in% genelist_dearseq),
+  voom = as.numeric(all_genes %in% genelist_voomlimma),
+  edgeR = as.numeric(all_genes %in% genelist_edgeR)
+)
+
+# Set the row names to be the gene names
+rownames(upset_data) <- all_genes
+
+# Generate the UpSet plot
+upset(
+  upset_data,
+  sets = c("dearseq", "voom", "edgeR"),
+  # Specify the sets you are comparing
+  nsets = 3,
+  # Number of sets to show
+  order.by = "freq",
+  # Order by frequency of overlaps
+  empty.intersections = "on",
+  # Include empty intersections
+  main.bar.color = "black",
+  # Color of the bars
+  sets.bar.color = c("red", "green", "blue")  # Color for each set
+)
+```
+

@@ -1,0 +1,553 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+# Task Overview 
+
+> [Singhania et al, 2018](https://www.nature.com/articles/s41467-018-04579-w) analysed a dataset consisting of transcriptomic responses to Tuberculosis infection. In this practical, we will perform some statistical tests on the data and examine different types of correction to control inflated family-wise-error rate and false discovery rate. 
+
+> Today, we will only be using the London dataset. You may run Section 0 to load and pre-process the data, remove uninformative genes, and perform data normalisation with log2-CPM-TMM. 
+
+# Data Preprocessing, Normalisation
+
+## 0a) Install and Load Required Packages
+
+> Using `install.packages()`, install the following packages from the CRAN : BiocManager, readxl, dplyr, flashClust, UpSetR, tidyR, ggplot2, stringr, dendextend, ggdendro, ggrepel, VennDiagram, grid.
+
+> Using `BiocManager::install()`, install the following packages from `BioConductor` : GEOquery, edgeR, limma, pvca, dearseq, sva. 
+
+> The following chunk will check if you already have any of these packages and then install the missing ones.
+
+```{r, echo = F, results = 'hide', message = F}
+# This sets the options for the outputs when knitting the rmd file
+knitr::opts_chunk$set(warning = FALSE,
+                      message = TRUE,
+                      fig.width = 15,
+                      fig.height = 11)
+```
+
+
+```{r, eval = F, results = 'hide', message = FALSE, warning = FALSE}
+cran_packages <- c(
+  "BiocManager",
+  "readxl",
+  "dplyr",
+  "flashClust",
+  "UpSetR",
+  "tidyr",
+  "ggplot2",
+  "stringr",
+  "dendextend",
+  "ggdendro",
+  "ggrepel",
+  "VennDiagram",
+  "grid"
+)
+
+# Install missing CRAN packages
+install.packages(setdiff(cran_packages, installed.packages()[, "Package"]))
+
+# ---- BioConductor Packages ----
+bioc_packages <-
+  c("GEOquery", "edgeR", "limma", "pvca", "dearseq", "sva")
+
+# Load BiocManager and install missing Bioconductor packages
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install(setdiff(bioc_packages, installed.packages()[, "Package"]))
+```
+
+```{r, echo = F, results = 'hide', message = F}
+library(BiocManager)
+library(GEOquery)
+library(edgeR)
+library(limma)
+library(pvca)
+library(tidyr)
+library(readxl)
+library(dplyr)
+library(flashClust)
+library(UpSetR)
+library(ggplot2)
+library(stringr)
+library(dendextend)
+library(VennDiagram)
+library(grid)
+library(ggrepel)
+library(dearseq)
+library(sva)
+```
+
+> [Take the following link to the NCBI's gene expression omnibus](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE107995) for the series *A modular transcriptional signature identifies phenotypic heterogeneity of human tuberculosis infection*. Scroll down and click on the links to the SubSeries `GSE107991`, corresponding to the London cohort. Download the corresponding raw count data (i.e. 'GSE107991_Raw_counts_Berry_London.xlsx') and save it in a directory.
+
+## 0b) Load data
+
+> First, change the line below to specify the path where you saved your data. 
+
+```{r, include = F}
+data_path = "/home/ah3/Desktop/Work/Teaching/M2 PHDS Final Resources/omics 2025/data/"
+```
+
+> Load the raw counts data with the `read_excel()` function. 
+
+```{r, message = F}
+# Read the raw counts for the London data
+london_raw <-
+  read_excel(paste0(data_path, "GSE107991_Raw_counts_Berry_London.xlsx"))
+```
+
+## 0c) Download metadata
+
+> Use the `GEOquery()` function to download the metadata corresponding to these files. 
+
+```{r, results = 'hide', message = F}
+# Load the metadata for the London, South Africa, and Leicester datasets
+london_metadata <-
+  GEOquery::getGEO("GSE107991", GSEMatrix = FALSE)  #London
+```
+
+## 0d) Process the metadata
+> Extract relevant information from the metadata.
+
+```{r}
+# This function extracts the relevant columns from the metadata files and changes some of the names of the values
+get_info <- function(i, meta) {
+  name <- meta@gsms[[i]]@header$source_name_ch1
+  name <- gsub("Active_TB", "ActiveTB", name)
+  name <- gsub("Test_set", "TestSet", name)
+  name <- gsub("Validation_set", "ValidationSet", name)
+  name <- gsub("Non_progressor", "NonProgressor", name)
+  res <- unlist(strsplit(name, split = "_"))
+  res <- c(res, meta@gsms[[i]]@header$title)
+  res
+}
+
+infos_london <-
+  sapply(1:length(london_metadata@gsms),
+         FUN = get_info,
+         meta = london_metadata)
+infos_df_london <-
+  cbind.data.frame(GSMID = names(london_metadata@gsms),
+                   t(infos_london))
+rownames(infos_df_london) <- names(london_metadata@gsms)
+colnames(infos_df_london)[-1] <-
+  c("Cohort", "Location", "Set", "Status", "SampleName")
+```
+
+## 0e) Merge data
+
+> Change the format to wide, so each column is a gene, and merge the data.
+
+```{r}
+# Bind the metadata for London, SA, and Leicester together
+infos_all <- infos_df_london %>% as.data.frame()
+
+# Bind the counts for London, SA, and Leicester together
+counts_merged <- london_raw %>% select(-Gene_name, -Gene_biotype)
+
+# pivot to wide format
+counts_all <- t(counts_merged)[-1,] %>% as.data.frame()
+
+# Columns are genes
+colnames(counts_all) = counts_merged$Genes
+
+# Rows are samples
+rownames(counts_all) = 1:dim(counts_all)[1]
+
+# Now we merge the counts with the metadata by the sample name
+merged_all = merge(
+  y = bind_cols("SampleName" = colnames(counts_merged)[-1], counts_all),
+  x = infos_all,
+  by = "SampleName"
+) %>% distinct() 
+
+# here we extract the counts and store them as numeric values in the dataframe
+counts_all = merged_all %>% select(-c(1:6)) %>% 
+  sapply(as.numeric) %>% 
+  as.data.frame()
+
+# Here we extract the metadata
+metadata_all = merged_all %>% select(c(1:6))
+
+# Visualise the start of the merged dataframe
+merged_all[, c(1:8)] %>% head(5)
+```
+
+## 0f) Remove unexpressed genes
+
+> Counts matrices usually contain some completely uninformative variables (i.e. with 0 counts in every sample). Remove these from the data and report how many columns were removed. 
+
+```{r}
+# Extract the total counts for each gene
+count_sums <- colSums(counts_all)
+
+# Unexpressed genes are those without a single count across samples
+unexpressed_genes = colnames(counts_all)[count_sums == 0]
+
+# Remove these from the data
+counts_all_filtered = counts_all %>% 
+  select(-all_of(unexpressed_genes))
+
+# how many genes were removed?
+message(paste0(
+  unexpressed_genes %>% length(),
+  " unexpressed genes removed from the data."
+))
+```
+
+## 0e) Remove non-protein coding genes
+
+> Many investigators only include protein-coding genes in their analysis. Information on whether a gene is protein coding or not may be found in the raw counts under the Gene_biotype columns. 
+
+```{r}
+london_raw$Gene_biotype %>% head()
+```
+
+> Using this information, filter the counts to only include genes who are protein-coding. Report the amount of genes removed at this stage. 
+
+```{r}
+# Use the london data to extract the names of the protein-coding genes
+non_protein_coding_genes = london_raw %>%
+  filter(Gene_biotype != "protein_coding") %>%
+  pull(Genes)
+
+# De-select non-protein-coding genes from the counts matrix
+counts_all_filtered_proteincoding = counts_all_filtered %>%
+  select(!any_of(non_protein_coding_genes))
+
+# how many genes were removed?
+message(paste0(
+  intersect(non_protein_coding_genes, colnames(counts_all_filtered)) %>% length(),
+  " non-protein-coding genes removed from the data."
+))
+```
+
+> Now we are finished with the data loading and merging, we may remove all of the unnecessary data from the global environment using the `rm()` function. This is good practice when using high-dimensional data, as memory can quickly be occupied by large, unnecessary files in the global environment. 
+
+```{r}
+# Here we list the objects to keep
+keep <-
+  c("metadata_all",
+    "counts_all_filtered_proteincoding",
+    "data_path")
+
+# Remove everything else from the global environment
+rm(list = setdiff(ls(), keep))
+
+# Garbage collection to clear unused memory
+gc()
+```
+
+# 1) Voom-Limma differential analysis
+
+## 1a) Differential testing 
+
+> Perform a differential gene expression analysis using voom-limma. A tutorial can be [found here](https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/thursday/DE.html).
+
+```{r}
+# Define a new column testGroup which groups together LTBI and control patients into one control group
+metadata_all = metadata_all %>%
+  mutate(testGroup = recode_factor(Status, "LTBI" = "Control")) %>%
+  relocate(testGroup, .after = Status)
+
+dge <-
+  DGEList(counts = t(counts_all_filtered_proteincoding),
+          group = metadata_all$testGroup)
+
+# Calculate normalisation factors with TMM
+dge <- calcNormFactors(dge, method = "TMM")
+
+# Specify a design matrix
+design <- model.matrix( ~ testGroup, data = metadata_all)
+
+# Use the voom() function to estimate the mean-variance relationship
+v <- voom(dge, design, plot = TRUE, span = 0.1)
+
+# Fit the linear models to the data
+fit_voom <- lmFit(v, design)
+
+# Perform empirical Bayes tests
+fit_voom <- eBayes(fit_voom, robust = TRUE)
+
+# Put the results in a dataframe and find significant gene names
+results_voom = topTable(fit_voom, coef = 2, n = Inf) %>% as.data.frame()
+```
+
+## 1b) Extract raw p-values
+
+> 1b) Extract the raw p-values from this test from the `eBayes()` object and store them in a dataframe. Sort the p-values in ascending order and store the ranks in the same dataframe. 
+
+```{r}
+# Extract raw p-values and sort from smallest to largest. Make a new column for the ranks. 
+p_val_df = results_voom %>% 
+  rename(p_value_unadjusted = P.Value) %>%  # rename the column 
+  select(p_value_unadjusted) %>%  # remove the other columns
+  arrange(p_value_unadjusted) %>%  # order the rows by ascending p-value order
+  mutate(p_value_rank = rank(p_value_unadjusted)) # make a new column for the ranking
+```
+
+
+## 1c) Histogram of raw p-values
+
+> 1c) In ggplot2, plot a histogram of the raw p-values. What do you notice about the shape of the distribution? Why do you think this is?
+
+```{r}
+ggplot(p_val_df, aes(x = p_value_unadjusted)) +
+  geom_histogram(bins = 50,
+                 color = "black",
+                 fill = "steelblue") +
+  labs(title = "Histogram of Unadjusted P-values",
+       x = "P-value",
+       y = "Count") +
+  theme_minimal(base_size = 16)
+```
+
+> The distribution appears to be a mixture of two distributions. The first, under the null, is likely to be uniformly distributed over the 0,1 interval. The other, under the alternative, is heavily skewed towards 0.
+
+# 2) P-value adjustment
+
+## 2a) P-value adjustment
+
+> 2a) Using the `p.adjust()` function, adjust the raw p-values according to the Bonferroni, Holm, Benjamini-Hochberg, and Benjamini-Yekutieli corrections. Store them in different columns of the same dataframe. Based on a significance level of 0.05, compare the number of significant genes that you find according to each of the methods. Which are the strictest methods?
+
+```{r}
+p_val_df = p_val_df %>% mutate(p_value_holm = p.adjust(p_value_unadjusted, method = "holm"),
+                               p_value_bonferroni = p.adjust(p_value_unadjusted, method = "bonferroni"),
+                               p_value_BH = p.adjust(p_value_unadjusted, method = "BH"),
+                               p_value_BY = p.adjust(p_value_unadjusted, method = "BY")) %>% 
+  relocate(p_value_rank, .before = p_value_unadjusted)
+
+n_unadjusted = p_val_df %>% filter(p_value_unadjusted < 0.05) %>%
+  nrow()
+
+n_holm = p_val_df %>% filter(p_value_holm < 0.05) %>%
+  nrow()
+
+n_bonferroni = p_val_df %>% filter(p_value_bonferroni < 0.05) %>%
+  nrow()
+
+n_BH = p_val_df %>% filter(p_value_BH < 0.05) %>%
+  nrow()
+
+n_BY = p_val_df %>% filter(p_value_BY < 0.05) %>%
+  nrow()
+
+message(n_unadjusted, " genes significant without adjustment.")
+
+message(n_holm, " genes significant under Holm correction.")
+
+message(n_bonferroni, " genes significant under Bonferroni correction.")
+
+message(n_BH, " genes significant under BH correction.")
+
+message(n_BY, " genes significant under BY correction.")
+```
+
+# 3) Visualisation of p-values
+
+## 3a) Adjusted p-value plot
+
+> 3a) Plot the log10-tansformed p-values against their ranks for all the correction methods on the same plot. Colour the points by their correction method. What can you say about the strictness of each method? 
+
+```{r}
+df_adjusted <- p_val_df %>%
+  pivot_longer(
+    cols = c(
+      p_value_unadjusted,
+      p_value_bonferroni,
+      p_value_holm,
+      p_value_BH,
+      p_value_BY
+    ),
+    names_to = "Correction_Method",
+    values_to = "Adjusted_P_Value"
+  )
+
+df_adjusted %>%  ggplot(aes(
+  x = p_value_rank,
+  y = log10(Adjusted_P_Value),
+  color = as.factor(Correction_Method)
+)) +
+  geom_point(alpha = 0.6) +  # Scatter plot of ranks vs. log10(adjusted p-values)
+  geom_hline(
+    yintercept = log10(0.05),
+    color = "red",
+    linetype = "dotdash",
+    size = 1
+  ) +  # No correction threshold
+  scale_color_manual(
+    values = c(
+      "p_value_bonferroni" = "purple",
+      "p_value_holm" = "green",
+      "p_value_BH" = "blue",
+      "p_value_BY" = "orange",
+      "p_value_unadjusted" = "red"
+    ),
+    name = "Correction Method"
+  ) +
+  labs(title = "Adjusted P-values by Correction Method",
+       x = "Rank (smallest to largest)",
+       y = "log10(Adjusted P-value)") +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.background = element_rect(fill = 'white', color = 'white')
+  )
+```
+
+## 3b) Unadjusted p-values against thresholds
+
+> When we perform multiplicity corrections, we can either correct the p-values themselves, or we can correct the (per-p-value) significance levels. For example, in the bonferroni correction, we can either multiply each p-value by the number of tests performed, and compare it to the unadjusted significance level (e.g. 5%), or we could equivalently *divide* the significance level by the number of tests and compare the unadjusted p-values to it. If the p-values are ordered from smallest to largest as $p_{1},...,p_{N}$, the bonferroni thresholds are therefore given by
+
+\[
+p_i \le \frac{\alpha}{N}, \quad i = 1, \dots, N
+\]
+
+> The thresholds for the Holm correction are given as 
+
+\[
+p_{(i)} \le \frac{\alpha}{N-i+1}, \quad i = 1, \dots, N
+\]
+
+> The thresholds for the B-H procedure are given as 
+
+\[
+p_{(i)} \le \frac{i}{N} \alpha, \quad i = 1, \dots, N
+\]
+
+> The thresholds for the B-Y procedure are given as 
+
+\[
+p_{(i)} \le \frac{i}{N} \frac{\alpha}{c(N)}, \quad i = 1, \dots, N, \quad c(N) = \sum_{j=1}^{N} \frac{1}{j}
+\]
+
+
+> Plot the log10-tansformed **unadjusted** p-values against their ranks. Draw lines in different colours showing the thresholds for each of the correction methods, as detailed above. Then, colour the points according to the most strict threshold passed (for reference, see slide 48 of the Test Multiplicity course).  
+
+```{r}
+df_plot <- p_val_df %>%
+  mutate(
+    N = n(),
+    # total tests
+    alpha = 0.05,
+    # thresholds for each position i = p_value_rank
+    bonferroni_th = alpha / N,
+    holm_th      = alpha / (N - p_value_rank + 1),
+    bh_th        = (p_value_rank / N) * alpha,
+    cN           = sum(1 / (1:N)),
+    by_th        = bh_th / cN
+  ) %>%
+  # assign category by checking strictest threshold first
+  mutate(
+    decision = case_when(
+      p_value_unadjusted < bonferroni_th ~ "Reject (Bonferroni)",
+      p_value_unadjusted < holm_th      ~ "Reject (Holm)",
+      p_value_unadjusted < by_th        ~ "Reject (BY)",
+      p_value_unadjusted < bh_th        ~ "Reject (BH)",
+      p_value_unadjusted < alpha        ~ "Reject (Nominal)",
+      TRUE                               ~ "Never reject"
+    )
+  ) %>%
+  # keep only what we need for plotting
+  select(p_value_rank,
+         p_value_unadjusted,
+         decision,
+         bonferroni_th,
+         holm_th,
+         bh_th,
+         by_th,
+         alpha)
+
+# Small safety: convert decision to factor with stable ordering (for legend)
+df_plot$decision <- factor(
+  df_plot$decision,
+  levels = c(
+    "Reject (Bonferroni)",
+    "Reject (Holm)",
+    "Reject (BY)",
+    "Reject (BH)",
+    "Reject (Nominal)",
+    "Never reject"
+  )
+)
+
+# Data frame for lines (one row per p_value_rank)
+df_lines <- df_plot %>%
+  select(p_value_rank, bonferroni_th, holm_th, bh_th, by_th, alpha) %>%
+  distinct()
+
+# Plot: log10 p-values vs p_value_rank, lines hidden from legend, legend shows only point colours
+p_val_threshold_plot <- ggplot() +
+  # points colored by most-strict threshold they pass
+  geom_point(data = df_plot,
+             aes(
+               x = p_value_rank,
+               y = log10(p_value_unadjusted),
+               color = decision
+             ),
+             size = 1.8) +
+  # threshold lines (hidden from legend)
+  geom_line(
+    data = df_lines,
+    aes(x = p_value_rank, y = log10(bonferroni_th)),
+    linetype = "dashed",
+    color = "red",
+    size = 1,
+    show.legend = FALSE
+  ) +
+  geom_line(
+    data = df_lines,
+    aes(x = p_value_rank, y = log10(holm_th)),
+    linetype = "dashed",
+    color = "orange",
+    size = 1,
+    show.legend = FALSE
+  ) +
+  geom_line(
+    data = df_lines,
+    aes(x = p_value_rank, y = log10(by_th)),
+    linetype = "dashed",
+    color = "hotpink",
+    size = 1,
+    show.legend = FALSE
+  ) +
+  geom_line(
+    data = df_lines,
+    aes(x = p_value_rank, y = log10(bh_th)),
+    linetype = "dashed",
+    color = "purple",
+    size = 1,
+    show.legend = FALSE
+  ) +
+  geom_hline(
+    yintercept = log10(df_plot$alpha[1]),
+    linetype = "dashed",
+    color = "black",
+    size = 0.8,
+    show.legend = FALSE
+  ) +
+  # color mapping for points only
+  scale_color_manual(
+    values = c(
+      "Reject (Bonferroni)" = "red",
+      "Reject (Holm)"        = "orange",
+      "Reject (BY)"          = "hotpink",
+      "Reject (BH)"          = "purple",
+      "Reject (Nominal)"     = "blue",
+      "Never reject"         = "grey50"
+    )
+  ) +
+  labs(
+    title = "log10(unadjusted p-values) vs rank with multiplicity thresholds",
+    x = "Rank of p-value",
+    y = "log10(p-value)",
+    color = "Most strict threshold passed"
+  ) +
+  theme_minimal(base_size = 18) +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+p_val_threshold_plot
+```

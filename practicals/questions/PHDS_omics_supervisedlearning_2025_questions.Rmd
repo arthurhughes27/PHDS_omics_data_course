@@ -1,0 +1,582 @@
+# Task description
+
+> In this task, we are going to use various **supervised learning methods** to try to predict the antibody response to influenza vaccination using early gene expression measurements.
+
+> To save us some time, I have preprocessed the data for you. The data is an extract of open-access data from the Human Immune Project Consortium, with [detail of the study found here](https://immunespace.org/query/study/SDY1119#study-citations). The relevant information for this exercise is as follows :
+
+- Antibodies were measured at days 0 and 28
+- Gene expression of around 10,000 genes was measured at days 0 and 7
+
+> Flu is an interesting virus in this context, since it is a common disease, and many people may have already been infected with a given flu strain prior to vaccination. There is evidence in the literature that prior infection can modify the response to vaccination. Therefore, to take into account baseline (day 0) information, I have transformed both the response and the predictors into (log2) fold-change values. That is, the *ratio* between the post-vaccination and pre-vaccination measurements. 
+
+> Our task will be to see if the day 7 fold-change of expression in some genes is predictive of the day 28 fold-change in antibody levels. That is, we seek to find an early gene expression signature which informs us of the later antibody response.
+
+# Setup
+
+> Using `install.packages()`, install the following packages from the CRAN : `dplyr`, `ggplot2`, `caret`, `glmnet`, `matrixStats`, `doParallel`, `pls`.
+
+> Using `BiocManager::install()`, install the following packages from `BioConductor` : `mixOmics`. 
+
+> The following chunk will check if you already have any of these packages and then install the missing ones.
+
+```{r, echo = F, results = 'hide', message = F}
+# This sets the options for the outputs when knitting the rmd file
+knitr::opts_chunk$set(warning = F,
+                      message = T,
+                      fig.width = 8,
+                      fig.height = 8)
+```
+
+
+```{r, eval = F, results = 'hide', message = FALSE, warning = FALSE}
+cran_packages <- c(
+  "dplyr",
+  "ggplot2",
+  "caret",
+  "glmnet",
+  "matrixStats",
+  "doParallel",
+  "pls"
+)
+
+# Install missing CRAN packages
+install.packages(setdiff(cran_packages, installed.packages()[, "Package"]))
+
+# ---- BioConductor Packages ----
+bioc_packages <-
+  c("mixOmics")
+
+# Load BiocManager and install missing Bioconductor packages
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install(setdiff(bioc_packages, installed.packages()[, "Package"]))
+```
+
+```{r, echo = F, results = 'hide', message = F}
+# Set a seed for reproducibility
+set.seed(123)
+
+library(dplyr)
+library(caret)
+library(mixOmics)
+library(glmnet)
+library(ggplot2)
+library(matrixStats)
+library(doParallel)
+library(pls)
+```
+
+> Modify the following path to the directory where you saved your data. 
+
+```{r, include = F}
+data_path = "C:/Users/arthu/Documents/Work/Teaching/M2 PHDS Final Resources/omics 2025/practicals/data/"
+```
+
+```{r, eval = F}
+# Remember, the . replaces your working directory (i.e. root) folder. 
+# You can find your current working directory with getwd()
+data_path = "./your/path/to/data/"
+```
+
+> Now you can load the data into the global environment. 
+
+```{r}
+df_all = get(load(paste0(
+  data_path, "SDY1119_day7_GE_foldChange.RData"
+)))
+```
+
+> We can explore the data first to see what we're dealing with. Let's print the first few columns and rows.
+
+```{r}
+df_all[,c(1:8)] %>% 
+  head()
+```
+
+> We see that the first few columns give us some clinical information (participant id, sex, age), then we have the response value to be predicted, then the columns represent each gene, sorted alphabetically. Let's plot the response as a histogram.
+
+```{r}
+df_all$response %>% 
+  hist(breaks = 20)
+```
+
+> We have a distribution with a relatively long tail. Some participants have negative values. These are participants whose antibody levels decreased after vaccination! When we log transform a fold-change value between 0 and 1 (i.e. less antibodies at day 28 compared to day 0), we get a negative. 
+
+# 1) Ridge regression
+## 1a) Nested cross-validation
+
+> We are going to start by performing ridge regression in a (nested) cross-validation setup. 
+
+> The goal is to evaluate a given predictive model's performance on unseen data. The simplest approach to achieve this is a test-train split. Here, observations are randomly assigned to either the training set or the testing set. A model is trained on the training set, and used to predict on the unseen testing set. The predictions can then be compared to their true values to obtain an unbiased estimate of the model's performance. However, this approach uses data inefficiently and depends on the random splitting of the data. 
+
+> K-fold Cross-validation is a better alternative to this approach. Here, we first split the data into K distinct *folds* (partitions of the data). Cross-validation is a loop, where in each stage, a different fold is chosen to act as the testing set. Therefore, K-fold cross-validation results in a series of K models and sets of predictions which can be used to evaluate the performance. 
+
+> Some models have *hyperparameters* to specify, which are parameters which control certain aspects of the learning process. Ridge regression and other penalised approaches use a hyperparameter which controls the strength of the penalisation term. Since we are unlikely to have much reason to prefer any particular values of these hyperparameters, we may prefer to let the data decide for us which are the *best* values. We can also do this with cross-validation. 
+
+> Typically, we do something called *nested cross-validation* in order to first build a model with optimal hyperparameters, and then use that model to predict on unseen data. A nested cross-validation has two loops. The first, called the *outer loop*, separates the training data from the testing data. The second, called the *inner loop*, uses cross-validation on the training data only to select the best values of the model hyperparameters which give optimise a particular metric on the unseen inner loop testing data. 
+
+> Take the metric to optimise to be the root-mean-squared-error. That is, 
+
+$$
+\text{RMSE} = \sqrt{\frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2}
+$$
+
+> This can be computed with the following helper function, which takes a vector of observed values, and a vector of predicted values, and computes the RMSE.
+
+```{r}
+rmse <- function(obs, pred) {
+  sqrt(mean((obs - pred) ^ 2, na.rm = TRUE))
+}
+```
+
+> The following code chunk manually codes a nested 10-fold cross validation with a ridge regression model. Read through the code and make sure you understand the underlying process - you will be modifying this code for the rest of the exercise. 
+
+```{r}
+# Make a dataframe from the response and all the predictors
+df_predict = df_all %>%
+  dplyr::select(response, a1cf:zzz3)
+
+# Select the response as a numeric vector, y
+y_vec = df_predict %>%
+  dplyr::select(response) %>%
+  as.matrix()
+
+# Select the predictors as a numeric matrix, X. The columns are predictors and the rows are samples.
+X_mat = df_predict %>%
+  dplyr::select(-response) %>%
+  as.matrix()
+
+# Specify the number of folds for the outer cross-validation loop
+n_outer <- 10
+
+# Specify the number of folds for the inner cross-validation loop
+n_inner <- 5
+
+# Select the options for the hyperparameter lambda to tune in the inner loop
+lambda_grid <-
+  c(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 3, 4, 5, 10, 20, 50, 100)
+
+# Extract the number of observations
+n <- nrow(X_mat)
+
+# Create the outer-layer folds using the createFolds() function
+folds_outer <- createFolds(y_vec, k = n_outer, list = TRUE, returnTrain = FALSE)
+
+# Initialise a list to store results for each fold
+outer_results <- vector("list", n_outer)
+
+# Name the elements of this list
+names(outer_results) <- paste0("fold", seq_len(n_outer))
+
+# Initialise a vector to store the predictions for each of the n observations
+y_pred_all <- rep(NA_real_, n)
+
+# Now, start the nested cross-validation loop
+for (i in seq_len(n_outer)) {
+  # For fold i
+  
+  # Set the testing set as fold i
+  ## Extract the test set row numbers corresponding to the ith fold
+  test_idx <- folds_outer[[i]]
+  
+  # The training set is formed of all the other observations
+  ## Extract the training set row numbers by removing the testing set indices from all of the indices
+  train_idx <- setdiff(seq_len(n), test_idx)
+  
+  
+  # Training data
+  ## Select only the training set rows from the predictors and response
+  X_train_outer <- X_mat[train_idx, ]
+  y_train_outer <- y_vec[train_idx]
+  
+  # Testing data
+  ## Select only the testing set rows from the predictors and response
+  X_test_outer  <- X_mat[test_idx, ]
+  y_test_outer  <- y_vec[test_idx]
+  
+  # Inner cross-validation loop #
+  # Create folds on the training data only
+  ## First, randomly permute the row numbers
+  perm_inner <- sample(length(train_idx))
+  
+  # Now, cut this random permutation n_inner times
+  folds_inner <-
+    split(perm_inner, cut(
+      seq_along(perm_inner),
+      breaks = n_inner,
+      labels = FALSE
+    ))
+  
+  # Initialise a matrix to save the RMSE values for models trained on each hyperparameter option
+  ## This is a matrix where each column is a different fold, each row is a different hyperparameter option
+  ## The entries are the RMSE of the model when predicting on the held-out data
+  inner_rmse_mat <-
+    matrix(NA_real_, nrow = n_inner, ncol = length(lambda_grid))
+  
+  # Initialise inner-loop
+  for (j in seq_len(n_inner)) {
+    # For each inner fold
+    
+    # Extract the indices of the testing data in the inner loop
+    ## Careful - these indices are relative to the training data and not to the full data
+    test_idx_in_train <- folds_inner[[j]]
+    
+    # We extract the indices relative to the full data like so
+    test_idx_full <- train_idx[test_idx_in_train]
+    
+    # Extract the indices of the training data in the inner loop
+    ## This is just removing the testing indices from the complete set of indices
+    train_idx_in_train <-
+      setdiff(seq_along(train_idx), test_idx_in_train)
+    
+    # Again, we extract the indices relative to the full data like so
+    train_idx_full <- train_idx[train_idx_in_train]
+    
+    # Inner training set
+    X_inner_train <- X_mat[train_idx_full, ]
+    y_inner_train <- y_vec[train_idx_full]
+    
+    # Inner testing set
+    X_inner_test   <- X_mat[test_idx_full, ]
+    y_inner_test   <- y_vec[test_idx_full]
+    
+    # Data scaling
+    ## Here, we scale the training and testing data separately to avoid "data leakage"
+    ## We can scale each column in the training data to have mean 1 and std. deviation by subtracting the column mean and dividing by the column standard deviation
+    
+    # Here, calculate the mean for each gene
+    col_means <- colMeans(X_inner_train)
+    # Now, calculate the standard deviation for each gene
+    col_sds   <- apply(X_inner_train, 2, sd)
+    
+    # In case any gene is constant, set the standard deviation to 1 to avoid an error
+    col_sds[col_sds == 0 | is.na(col_sds)] <- 1
+    
+    # Scale the training samples using the scale() function
+    X_inner_train_s <-
+      scale(X_inner_train, center = col_means, scale = col_sds)
+    
+    # We can now put the testing data on the same scale by centering and scaling according to the training data values
+    X_inner_test_s   <-
+      scale(X_inner_test,   center = col_means, scale = col_sds)
+    
+    # Fit regularised linear regression models using glmnet()
+    ## The glmnet() function with alpha set to 0 implements ridge regression
+    ## Putting lambda = lambda_grid trains models on each value of lambda we specified
+    fit_inner <- glmnet(
+      x = X_inner_train_s,
+      y = y_inner_train,
+      alpha = 0,
+      lambda = lambda_grid,
+      standardize = T,
+      intercept = T
+    )
+    
+    # Use these models to make predictions on the inner test set
+    preds_test_all <-
+      predict(fit_inner, newx = X_inner_test_s, s = lambda_grid)
+    
+    # This line computes the RMSE between the predictions for each lambda value and the true test values and stores them in the inner loop RMSE matrix
+    inner_rmse_mat[j,] <-
+      apply(preds_test_all, 2, function(pcol)
+        rmse(y_inner_test, pcol))
+  } # end inner loop
+  
+  # Find the best value of the hyperparameter lambda from the inner loop
+  
+  # Mean RMSE for each value of lambda
+  mean_rmse_per_lambda <- colMeans(inner_rmse_mat, na.rm = TRUE)
+  
+  # The best value is the one which minimises the mean RMSE across the inner folds
+  best_lambda <- lambda_grid[which.min(mean_rmse_per_lambda)]
+  
+  # ---- Fit final model on outer training data using best_lambda ----
+  
+  # Data scaling
+  ## Again, we should scale training and testing data separately to avoid data leakage
+  
+  # Compute the column means and standard deviations in the training data
+  col_means_outer <- colMeans(X_train_outer, na.rm = TRUE)
+  col_sds_outer   <- apply(X_train_outer, 2, sd, na.rm = TRUE)
+  col_sds_outer[col_sds_outer == 0 | is.na(col_sds_outer)] <- 1
+  
+  # Scale the training and testing data according to the training data means and sds
+  X_train_outer_s <-
+    scale(X_train_outer, center = col_means_outer, scale = col_sds_outer)
+  X_test_outer_s  <-
+    scale(X_test_outer,  center = col_means_outer, scale = col_sds_outer)
+  
+  # Fit the "final model" to the training data with the best value of lambda
+  fit_outer <- glmnet(
+    x = X_train_outer_s,
+    y = y_train_outer,
+    alpha = 0,
+    lambda = best_lambda,
+    standardize = T,
+    intercept = T
+  )
+  
+  # Make predictions on the test data using the final model
+  # Make sure these are numeric values
+  preds_test_vec <-
+    predict(fit_outer, newx = X_test_outer_s, s = best_lambda) %>%
+    as.numeric()
+  
+  # store predictions in prediction vector aligned to original sample indices
+  y_pred_all[test_idx] <- preds_test_vec
+  
+  # Calculate test root mean squared error
+  test_rmse <- rmse(y_test_outer, preds_test_vec)
+  
+  # Save the results for the ith fold in the ith element of the list
+  outer_results[[i]] <- list(
+    fold = i,
+    test_idx = test_idx,
+    best_lambda = best_lambda,
+    mean_rmse_per_lambda = mean_rmse_per_lambda,
+    lambda_grid = lambda_grid,
+    test_rmse = test_rmse,
+    y_test = y_test_outer,
+    y_pred = preds_test_vec
+  )
+  
+  # Print a message to keep us updated on loop progress
+  message(
+    sprintf(
+      "Finished outer fold %d: selected lambda = %g, test RMSE = %0.4f",
+      i,
+      best_lambda,
+      test_rmse
+    )
+  )
+} # end outer loop
+
+# Make a dataframe of true versus predicted values
+cv_results = data.frame("response" = y_vec,
+                        "predicted" = y_pred_all)
+```
+
+## 1b) Model evaluation
+
+> Compute two metrics to evaluate the performance of your predictive models on the unseen data: the standardised root-mean-squared-error and the R2 statstic. 
+
+> The standardised RMSE is the RMSE of your predictions compared to the true values, divided by the standard deviation of the true values. The lower this value is, the better. If the sRMSE = 1, your predictions are as good on average as a model which simply predicts the response as the training sample mean (i.e. who does not use any of the predictor information). Anything less than 1 indicates a model which predicts better than this naïve model. The formula for the standardised RMSE is : 
+
+$$
+\text{sRMSE} = \frac{\sqrt{\frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2}}{sd(y)}
+$$
+
+> The R2 statistic is the squared pearson correlation between the response and predicted values. The higher this is, the better. It can be interpreted as "the proportion of variability in the true response which is explained by the predictions". The formula is the following : 
+
+$$
+R^{2} = cor_{\text{pearson}}(y, \hat{y})^{2}
+$$
+
+> In terms of these metrics, are you happy with the quality of these predictions?
+
+
+## 1c) Plot the results
+
+> Now, using the `ggplot2` package, plot your predicted values against the true response values. Ensure that the x and y axes have the same limits and scale. Plot the "identity line" through the diagonal of the plot. This line shows where perfect predictions lie (i.e. predicted value = true value). 
+
+
+## 1d) Variable filtration
+
+> Ridge regression can handle multicollinearity, but suffers in the (very) high-dimensional setting. This is because the penalisation term in ridge regression is incapable of reducing the variable coefficients to 0, and thus, every input variable contributes to the final model. Therefore, ridge regression tends to accumulate noise in very high-dimensional settings. 
+
+> A simple way to reduce the dimension of the data prior to predictive modelling could be to apply some kind of variable filter. For example, we could make a hypothesis that the most variable genes are likely to be the genes which contribute the most in terms of predictive information. 
+
+> Write a function which filters the genes in the input data by finding the genes which are in the top n% of predictors by variance. 
+
+> Make a new dataframe of predictors by selecting only the top 10% of most variable genes. Now, run the nested cross-validation loop above using the filtered dataframe. How do your results change?
+
+# 2) Lasso regression
+
+> Lasso regression is another regularised method which has the advantage over ridge regression that it can reduce model coefficients fully to 0. Lasso regression can be implemented in `glmnet()` by setting the argument `alpha = 1`. Using the nested-cross validation loop, implement lasso regression on your (filtered) prediction dataframe. How does this compare to ridge? 
+
+# 3) The `caret` package
+
+## 3a) Using `caret` to automate hyperparameter tuning
+
+> In the previous exercises, we hard-coded nested cross-validation to explicitly see how CV can be used both to tune model hyperparameters and to make unbiased predictions on unseen data. Since ridge and lasso regression are both implemented in the same package, it was easy to modify the code to run a different type of regression. In addition, we only had one hyperparameter to tune, lambda, which rendered the inner-cross validation loop relatively easy to hard-code.  
+
+> However, typically, different models are implemented in different packages in R, each with their own syntax. In addition, many models have 2 or more hyperparameters to tune, and it could get a bit messy to code the inner CV loop from scratch. 
+
+> Luckily, the `caret` package exists to automate hyperparameter tuning. Caret standardises syntax across packages to allow for many predictive models to be easily implemented. The other advantage is that it can make use of parallel processing so that we can speed up this process by using multiple cores at the same time. 
+
+> First, I'll give you an example of how the `caret` package works, by using it to implement lasso regression on the full dataset. 
+
+> If we want caret to make use of parallel processing, we have to *register* the cores we are willing to commit beforehand using the `doParallel` package. The total number of cores on your system can be detected with the `detectCores()` function. Here, I will be conservative, and register half of the available cores in the system for this processing. Feel free to experiment and push this a bit closer to your maximum. 
+
+```{r, eval = F}
+n_cores = detectCores()
+cl <- makeCluster(n_cores/2)
+registerDoParallel(cl)
+```
+
+> To train models and find the best hyperparameter(s), we use the `train()` function in `caret`. This function takes the following main arguments : 
+
+- `x` : the matrix or dataframe of predictors (columns) by samples (rows)
+- `y` : the vector of responses
+- `method` : the name of the regression method to be used. A full list of methods implemented in caret [can be found here](https://topepo.github.io/caret/available-models.html). Since we are implementing lasso regression, the method name is "glmnet". 
+- `preProcess` : defines how the data should be pre-processed. Here, we will set this argument to `c("center", "scale")` to tell it to center and scale our data. 
+- `tuneGrid` : a matrix where each column is a named hyperparameter from the method, and each row is a unique combination of these hyperparameters to be used to fit a model to the training data. 
+- `trControl` : an object created using the `trainControl()` function which defines how the tuning process should be performed (e.g. in this practical, we have been using 5-fold cross-validation to tune our hyperparameters).
+- `metric` : the metric to be optimised when choosing the *best* model. We will stick to RMSE here. 
+
+> Now, read through the following code and try to understand how caret is being used to implement the hyperparameter tuning in lasso regression. Note : you do not need to run the code itself, it could be quite long since I do not filter the genes beforehand. 
+
+```{r, eval = F}
+# Make prediction dataframe by selecting response and predictors (all genes)
+df_predict <- df_all %>% dplyr::select(response, a1cf:zzz3)
+
+# Define the response as a numeric vector
+y_vec <- as.numeric(df_predict$response)
+
+# Define predictors predictors as data.frame
+X_df <- df_predict %>% dplyr::select(-response)
+
+# Define the parameters for the cross validation
+# Number of folds in outer loop
+n_outer <- 10
+# Number of folds in inner loop
+n_inner <- 5
+# Lambda values to consider
+lambda_grid <- c(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 3, 4, 5, 10, 20, 50, 100)
+
+# Create outer folds using createFolds() function
+folds_outer <- createFolds(y_vec, k = n_outer, list = TRUE, returnTrain = FALSE)
+
+# Initialise results storage
+outer_results <- vector("list", n_outer)
+y_pred_all <- rep(NA_real_, length(y_vec))
+
+# Train control function to define how the tuning should be done
+inner_ctrl <- trainControl(
+  method = "cv", # This means we do cross-validation
+  number = n_inner, # This sets the number of folds for cross-validation
+  returnResamp = "none" # This just tells it not to return metrics for the tuning process
+)
+
+# We define a "tuning grid"
+## Each column is a hyperparameter and each row a unique combination of specified hyperparameters
+## Since lasso regression is implemented in glmnet with alpha = 1, we need to define this in the grid
+tune_grid <- expand.grid(alpha = 1, lambda = lambda_grid)
+
+# Outer-CV loop
+for (i in seq_along(folds_outer)) { 
+  # Test indices
+  test_idx <- folds_outer[[i]]
+  # Train indices
+  train_idx <- setdiff(seq_len(nrow(X_df)), test_idx)
+  
+  # training and testing sets as data.frames
+  X_train <- X_df[train_idx, , drop = FALSE]
+  y_train <- y_vec[train_idx]
+  X_test  <- X_df[test_idx, , drop = FALSE]
+  y_test  <- y_vec[test_idx]
+  
+  # caret::train() will:
+  # - center & scale (preProcess),
+  # - perform inner CV to choose best lambda in tune_grid
+  # - return the model fitted on the full training set using the best tune
+  fit <- train(
+    x = X_train,
+    y = y_train,
+    method = "glmnet",
+    preProcess = c("center", "scale"),
+    tuneGrid = tune_grid,
+    trControl = inner_ctrl,
+    metric = "RMSE"
+  )
+  
+  # Extract the best tuning parameter
+  best_lambda <- fit$bestTune$lambda
+  
+  # predict on the outer test set; caret will apply the same preProcess transformation
+  preds <- predict(fit, newdata = X_test)
+  
+  # store predictions
+  y_pred_all[test_idx] <- preds
+  
+  # compute RMSE on outer test
+  test_rmse <- sqrt(mean((y_test - preds)^2))
+  
+  outer_results[[i]] <- list(
+    fold = i,
+    test_idx = test_idx,
+    best_lambda = best_lambda,
+    resample_results = fit$results,   # rmse for each lambda from inner CV
+    test_rmse = test_rmse,
+    y_test = y_test,
+    y_pred = preds
+  )
+  
+  message(sprintf("Finished outer fold %d: selected lambda = %g, test RMSE = %0.4f",
+                  i, best_lambda, test_rmse))
+}
+
+# combine true vs predicted
+cv_results <- data.frame(response = y_vec, predicted = y_pred_all)
+
+# We must not forget to stop the parallel computing backend, unless we want our R to crash later on!
+stopCluster(cl)
+registerDoSEQ()
+```
+
+
+## 3b) Elastic net regression
+
+> Now we understand how `caret` can be used to implement hyperparameter tuning, your task is to implement elastic net regression by modifying the above code. You may do this on either the filtered dataframe, or the dataframe containing all the genes. Hint : the difference between elastic net and ridge/lasso is that the alpha hyperparameter can take values between 0 and 1. 
+
+## 3c) Principal Component Regression
+
+> Modify your above code to implement principal component regression using `caret::train()` with `method = "pcr"`. The hyperparameter to be tuned is the *number of components to keep*, `ncomp`.  
+
+## 3d) Partial Least Squares Regression 
+
+> Modify your above code to implement partial least squares regression using `caret::train()` with `method = "pls"`. Again, the hyperparameter to be tuned is the *number of components to keep*, `ncomp`.  
+
+# 4) Summary of predictive performance
+
+> We have now tried multiple regression approaches in a cross-validation framework in order to make predictions of the day 28-post-vaccination fold-change in antibody values using day-7 fold-change in gene expression levels. 
+
+> In a few sentences summmarise your conclusions on the predictive performance of these models. Did any model, or class of models, perform noticably better than the rest? 
+
+> How did reducing the dimension of your data by applying a basic variance-based filter to the genes change your predictive ability? 
+
+> Let's say we choose the *best model* by that which produced the best predictions in our cross-validation framework. Comment on how this strategy could introduce bias into our results. 
+
+# 5) Model interpretability
+
+> In the previous exercises, we have focused on code implementation and on maximising the predictive accuracy of the models. However, an important part of predictive analysis is the interpretation of any *predictive signatures*. Different regression methods may have different natural ways to interpret the predictive importance of the input variables on the response. For example, in multiple linear regression, we can interpret the effect size estimates, confidence intervals, and p-values for a test of non-zero effect size. Random forest has a metric called variable importance, which tells us the loss in predictive accuracy when a given variable's values are randomly permuted. 
+
+## 5a) Interpretation of Lasso
+
+> When using L1-regularised methods like lasso and elastic net, we may choose to interpret the predictors who have non-zero coefficients (i.e. the selected variables).
+
+> Fit a tuned lasso regression model using `caret::train()` on the entire dataset (i.e. ignore cross-validation for now). The *final model* (i.e. which corresponds to the model with the hyperparameters which produce the lowest CV-RMSE) can be accessed from the `$finalModel` argument of the `train()` object, and the corresponding lambda value from the `$lambdaOpt` argument of the final model.
+
+> Extract the coefficients of the model corresponding to this lambda using the `coef()` function on the final model with argument `s` equal to your best value of lambda. How many genes have non-zero coefficients? Can you think of a way to interpret these gene names to see if there are any particular biological processes which are over-represented?  
+
+## 5b) Interpretation of sPLS
+
+> Sparse partial least squares is an approach which uses L1 (lasso) regularisation on the weighting vectors in a partial least squares approach. That is, it finds sparse components which are maximally covarying with the response variable. We are going to implement this model using the `mixOmics` package. Unfortunately, this implementation is not available in `caret`, so we will have to use `mixOmics`'s internal functions to tune the model. The first hyperparameter to tune here is called `keep_X`, which tells us how many variables to select for each component. This is roughly equivalent to tuning the strength of the penalty term, like we have done previously in this exercise. The second hyperparameter to choose is called `ncomp`, which tells us how many final components we should keep.
+
+> Read the sPLS (regression) example on the [MixOmics site](https://mixomics.org/parameter-tuning/), and use the `tune.spls()` function on the entire dataset to determine the best values of `ncomp` and `keep_X` (again, forget about the cross-validation framework for now).
+
+> Note : there is a [known bug in the sPLS implementation in the regression setting](https://mixomics-users.discourse.group/t/error-in-check-entry-pls-x-y-ncomp-keepx-keepy-mode-mode-scale-scale-unmapped-y-contains-samples-with-no-associated-class-may-be-caused-by-nas-in-input-y-vector/1202/7), which may give you an error `Unmapped Y contains samples with no associated class`. This seems to be a problem when some values of the response are 0 : a workaround is to add a small value like 0.000001 to the response values, and the error should go away.
+
+> Now, with your best values of ncomp and keepX, fit a final model to the entire data. Extract the loading weights for the first latent variable and find the names of the genes with non-zero loading weights. How can we interpret these genes? [The following guide may help](https://mixomics.org/methods/spls/).
+
+## 5c) Stability Selection
+
+> K-fold Cross-validation complicates model interpretation, since, instead of having one model to interpret, we now have K models, each fit on different parts of the data, possibly using different hyperparameter values, and therefore using different selected variables. 
+
+> With L1-regularisation methods like lasso and elastic net, a solution is to interpret the *proportion of folds in which each variable is selected*. These approaches can broadly be called *stability selection* methods, as variables which are more frequently selected are more *stable* predictors.
+
+> The goal of this final question is to implement elastic net regression in a cross-validation setup, and assess the stability of the variables selected. Modify your code from question 3b) such that, during each outer fold, you store the names of the selected genes (i.e. those with non-zero coefficients). Then, make a plot which shows the proportion of selection on one axis, and the gene names on the other axis (sorted from most frequently selected to least frequently selected). 
+
+> How could you derive a *stable* predictive gene signature from this plot?
+
