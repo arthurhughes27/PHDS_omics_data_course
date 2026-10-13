@@ -9,9 +9,12 @@ library(mixOmics)
 library(gridExtra)
 library(Metrics)
 library(glmnet)
-library(reshape2) 
+library(reshape2)
+library(here)
 
-figure_directory = "/home/ah3/Bureau/Work/PhD/Teaching/M2 PHDS Final Resources/omics 2025/figures"
+# Figures are saved to <project root>/figures (the folder is created if needed)
+figure_directory = here("figures")
+dir.create(figure_directory, showWarnings = FALSE)
 
 
 # Set the seed for reproducibility
@@ -554,8 +557,8 @@ rmsep_results <- data.frame(
 # Display the results
 print(rmsep_results)
 
-# Real example
-prevac_merged = get(load("/home/ah3/Bureau/Work/PhD/RISE/data/processed/prevac_merged.RData"))
+# Real example (data are not distributed with this repository; place the file in <project root>/data)
+prevac_merged = get(load(here("data", "prevac_merged.RData")))
 
 # counts_rVSV = prevac_merged %>% filter(Timepoint %in% c("J0", "J7"), arm_short == "rVSV") %>% select(A1BG:ZZZ3) 
 # group = prevac_merged %>% filter(Timepoint %in% c("J0", "J7"), arm_short == "rVSV") %>% select(Timepoint) %>% as.matrix()

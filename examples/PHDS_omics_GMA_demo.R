@@ -1,5 +1,10 @@
 library(ggplot2)
 library(dplyr)
+library(here)
+
+# Figures are saved to <project root>/figures (the folder is created if needed)
+figure_directory = here("figures")
+dir.create(figure_directory, showWarnings = FALSE)
 
 # Plot 1 : motivation - disease subtypes by severity and number of symptoms
 
@@ -178,7 +183,7 @@ print(p5)
 
 ggsave(
   plot = p1,
-  path = fs::path("/home", "ah3", "Desktop", "Work", "Teaching", "M2 PHDS Final Resources", "omics 2025", "figures"),
+  path = figure_directory,
   filename = "clustering_demo1.png",
   units = "cm",
   width =  25,
@@ -187,7 +192,7 @@ ggsave(
 
 ggsave(
   plot = p2,
-  path = fs::path("/home", "ah3", "Desktop", "Work", "Teaching", "M2 PHDS Final Resources", "omics 2025", "figures"),
+  path = figure_directory,
   filename = "clustering_demo2.png",
   units = "cm",
   width =  25,
@@ -196,7 +201,7 @@ ggsave(
 
 ggsave(
   plot = p3,
-  path = fs::path("/home", "ah3", "Desktop", "Work", "Teaching", "M2 PHDS Final Resources", "omics 2025", "figures"),
+  path = figure_directory,
   filename = "dge_demo1.png",
   units = "cm",
   width =  25,
@@ -205,7 +210,7 @@ ggsave(
 
 ggsave(
   plot = p4,
-  path = fs::path("/home", "ah3", "Desktop", "Work", "Teaching", "M2 PHDS Final Resources", "omics 2025", "figures"),
+  path = figure_directory,
   filename = "dge_demo2.png",
   units = "cm",
   width =  25,
@@ -214,7 +219,7 @@ ggsave(
 
 ggsave(
   plot = p5,
-  path = fs::path("/home", "ah3", "Desktop", "Work", "Teaching", "M2 PHDS Final Resources", "omics 2025", "figures"),
+  path = figure_directory,
   filename = "dge_demo3.png",
   units = "cm",
   width =  35,
