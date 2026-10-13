@@ -1,6 +1,8 @@
 library(ggplot2)
 library(dplyr)
 
+figure_directory = fs::path("output", "figures")
+
 # Plot 1 : motivation - disease subtypes by severity and number of symptoms
 
 # Simulate very clearly separated symptom data
@@ -178,7 +180,7 @@ print(p5)
 
 ggsave(
   plot = p1,
-  path = fs::path("/home", "ah3", "Desktop", "Work", "Teaching", "M2 PHDS Final Resources", "omics 2025", "figures"),
+  path = figure_directory,
   filename = "clustering_demo1.png",
   units = "cm",
   width =  25,
@@ -187,7 +189,7 @@ ggsave(
 
 ggsave(
   plot = p2,
-  path = fs::path("/home", "ah3", "Desktop", "Work", "Teaching", "M2 PHDS Final Resources", "omics 2025", "figures"),
+  path = figure_directory,
   filename = "clustering_demo2.png",
   units = "cm",
   width =  25,
@@ -196,7 +198,7 @@ ggsave(
 
 ggsave(
   plot = p3,
-  path = fs::path("/home", "ah3", "Desktop", "Work", "Teaching", "M2 PHDS Final Resources", "omics 2025", "figures"),
+  path = figure_directory,
   filename = "dge_demo1.png",
   units = "cm",
   width =  25,
@@ -205,7 +207,7 @@ ggsave(
 
 ggsave(
   plot = p4,
-  path = fs::path("/home", "ah3", "Desktop", "Work", "Teaching", "M2 PHDS Final Resources", "omics 2025", "figures"),
+  path = figure_directory,
   filename = "dge_demo2.png",
   units = "cm",
   width =  25,
@@ -214,9 +216,11 @@ ggsave(
 
 ggsave(
   plot = p5,
-  path = fs::path("/home", "ah3", "Desktop", "Work", "Teaching", "M2 PHDS Final Resources", "omics 2025", "figures"),
+  path = figure_directory,
   filename = "dge_demo3.png",
   units = "cm",
   width =  35,
   height = 15
 )
+
+rm(list = ls())

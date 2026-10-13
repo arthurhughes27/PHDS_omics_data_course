@@ -11,7 +11,7 @@ library(Metrics)
 library(glmnet)
 library(reshape2) 
 
-figure_directory = "/home/ah3/Bureau/Work/PhD/Teaching/M2 PHDS Final Resources/omics 2025/figures"
+figure_directory = fs::path("output", "figures")
 
 
 # Set the seed for reproducibility
@@ -554,169 +554,6 @@ rmsep_results <- data.frame(
 # Display the results
 print(rmsep_results)
 
-# Real example
-prevac_merged = get(load("/home/ah3/Bureau/Work/PhD/RISE/data/processed/prevac_merged.RData"))
-
-# counts_rVSV = prevac_merged %>% filter(Timepoint %in% c("J0", "J7"), arm_short == "rVSV") %>% select(A1BG:ZZZ3) 
-# group = prevac_merged %>% filter(Timepoint %in% c("J0", "J7"), arm_short == "rVSV") %>% select(Timepoint) %>% as.matrix()
-
-counts_rVSV = prevac_merged %>% filter(Timepoint %in% c("J7"), arm_short %in% c("rVSV")) %>% select(A1BG:ZZZ3)
-
-# Calculate the variance for each gene (column)
-gene_variance <- apply(counts_rVSV, 2, var)
-
-# Get the variance threshold to keep the top 50% of genes
-threshold <- quantile(gene_variance, 0.95)
-
-# Subset the counts matrix to keep only genes with variance above the threshold
-counts_rVSV_filtered <- counts_rVSV[, gene_variance > threshold]
-
-response = prevac_merged %>% filter(Timepoint %in% c("J7"), arm_short %in% c("rVSV")) %>% select(Ab_D28) %>% as.matrix() %>% log()
-
-# Example data
-X <- counts_rVSV_filtered  # Gene expression data (samples x genes)
-Y <- response     # Continuous response variable (samples x 1)
-
-# Number of folds for cross-validation
-k_folds <- 10
-
-# Define the number of latent variables to test
-max_lv <- 15
-
-# Create fold indices for 10-fold cross-validation
-folds <- sample(rep(1:k_folds, length.out = nrow(X)))
-
-# Initialize a matrix to store RMSEP for each number of LVs and fold
-rmsep_matrix <- matrix(NA, nrow = k_folds, ncol = max_lv)
-
-# Perform 10-fold cross-validation
-for (fold in 1:k_folds) {
-  
-  # Split into training and testing data based on the fold
-  test_idx <- which(folds == fold)
-  train_idx <- setdiff(1:nrow(X), test_idx)
-  
-  X_train <- X[train_idx, ]
-  Y_train <- Y[train_idx]
-  
-  X_test <- X[test_idx, ]
-  Y_test <- Y[test_idx]
-  
-  # Fit PLS models with different numbers of latent variables (1 to max_lv)
-  for (lv in seq(1,max_lv,1)) {
-    pls_model <- pls(X_train, Y_train, ncomp = lv)
-    
-    # Predict on the test set
-    Y_pred <- predict(pls_model, X_test, ncomp = lv)$predict
-    
-    # Calculate RMSEP for this fold and number of LVs
-    rmsep_matrix[fold, lv] <- sqrt(mean((Y_test - Y_pred)^2))
-  }
-  print(fold)
-}
-
-# Calculate average RMSEP over all folds for each number of latent variables
-rmsep_avg <- apply(rmsep_matrix, 2, mean)
-
-# Create a data frame for plotting
-cv_rmsep_df <- data.frame(
-  LV = 1:max_lv,
-  CVRMSEP = rmsep_avg
-)
-
-# Plot the CV-RMSEP against the number of latent variables
-p8 = ggplot(cv_rmsep_df, aes(x = LV, y = CVRMSEP)) +
-  geom_line(color = "blue") +          # Line connecting the points
-  geom_point(color = "red", size = 2) + # Points at each LV
-  theme_minimal() +
-  labs(title = "Cross-Validated RMSEP vs. Number of Latent Variables",
-       x = "Number of Latent Variables (LV)",
-       y = "Cross-Validated RMSEP") +
-  theme_minimal(base_size = 18) +
-  theme(plot.title = element_text(hjust = 0.5),
-        plot.background = element_rect(fill = 'white', color = 'white'))  # Center the title
-
-pls_model_mixOmics <- pls(counts_rVSV_filtered, response, ncomp = 15)  # Specify the number of components you want
-# Extract the latent variable (LV) scores for the X block
-lv_scores <- pls_model_mixOmics$variates$X  # This gives you the scores for the samples
-
-# Create a data frame with the latent variable scores and the response
-scores_df <- data.frame(LV1 = lv_scores[, 1], 
-                        LV2 = lv_scores[, 2], 
-                        response = response)  # Keep response as continuous
-
-# Plot the individuals on LV1 and LV2 using ggplot2 with continuous color
-p9 = ggplot(scores_df, aes(x = LV1, y = LV2, color = response)) +
-  geom_point(size = 3) + 
-  theme_minimal() + 
-  labs(title = "Individuals Plot on LV1 and LV2",
-       x = "Latent Variable 1 (LV1)",
-       y = "Latent Variable 2 (LV2)",
-       color = "Log(Day 28 Antibodies)") +  # Customize the color legend title
-  scale_color_gradient(low = "blue", high = "red") +
-  theme_minimal(base_size = 18) +
-  theme(plot.title = element_text(hjust = 0.5),
-        plot.background = element_rect(fill = 'white', color = 'white'))  
-
-# Initialize vectors to store true and predicted values
-predicted_values <- numeric(length(response))
-true_values <- response  # Store true response values
-
-# Leave-One-Out Cross-Validation
-for (i in 1:length(response)) {
-  # Leave one out: create training and test sets
-  train_idx <- setdiff(1:length(response), i)  # All but the i-th observation
-  test_idx <- i  # The i-th observation
-  
-  # Train the model on the remaining data
-  pls_model_loo <- pls(counts_rVSV_filtered[train_idx, ], response[train_idx], ncomp = 15)
-  
-  # Predict the left-out observation
-  predicted_values[test_idx] <- (predict(pls_model_loo, counts_rVSV_filtered[test_idx, ])$predict)[15]
-}
-
-# Create a data frame for plotting
-predictions_df <- data.frame(
-  True = response,
-  Predicted = predicted_values %>% unlist()
-)
-
-# Plot the predicted vs true values
-p10 = ggplot(predictions_df, aes(x = Ab_D28, y = Predicted)) +
-  geom_point(color = "blue") +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") + # Line for perfect prediction
-  labs(title = "LOOCV Predicted Values vs True Values",
-       x = "True Values",
-       y = "Predicted Values") +
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5),
-        plot.background = element_rect(fill = 'white', color = 'white'))   +
-  coord_fixed() + 
-  xlim(5,8) + 
-  ylim(5,8)
-
-rmse(actual = predictions_df[,1], predicted = predictions_df[,2])
-
-p8
-p9
-p10
-
-ggsave(plot = p8, 
-       path = figure_directory,
-       filename = "PLS_demo8.png",
-       units = "cm", width = 25, height = 15)
-
-ggsave(plot = p9, 
-       path = figure_directory,
-       filename = "PLS_demo9.png",
-       units = "cm", width = 25, height = 15)
-
-ggsave(plot = p10, 
-       path = figure_directory,
-       filename = "PLS_demo10.png",
-       units = "cm", width = 25, height = 15)
-
-
 # Regularisation 
 
 # Generate synthetic data
@@ -1036,19 +873,4 @@ ggsave(plot = p17,
        filename = "PLS_demo17.png",
        units = "cm", width = 15, height = 11)
 
-# Demonstrating random associations
-
-fit <- lm(response ~ counts_rVSV$HERC6)
-
-counts_rVSV %>% ggplot(aes(x = HERC6, y = response)) + 
-  geom_point() + 
-  geom_abline(intercept = coef(fit)[1], slope = coef(fit)[2], color = "grey", linetype = "dashed") +
-  labs(title = "HERC6 vs Day 28 Antibodies",
-       x = "HERC6",
-       y = "log(D28 Antibodies)") +
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5),
-        plot.background = element_rect(fill = 'white', color = 'white'))   +
-  coord_fixed()
-
-# 
+rm(list = ls())
