@@ -180,7 +180,7 @@ leicester_raw <-
 
 ## 0e) Download metadata
 
-> Use the `GEOquery()` function to download the metadata corresponding to these files. 
+> Use the `getGEO()` function from the `GEOquery` package to download the metadata corresponding to these files. 
 
 ```{r, results = 'hide', message = F}
 # Load the metadata for the London, South Africa, and Leicester datasets
@@ -193,6 +193,7 @@ leicester_metadata <-
 ```
 
 ## 0f) Process the metadata
+
 > Extract relevant information from the metadata.
 
 ```{r}
@@ -208,39 +209,27 @@ get_info <- function(i, meta) {
   res
 }
 
-infos_london <-
-  sapply(1:length(london_metadata@gsms),
-         FUN = get_info,
-         meta = london_metadata)
-infos_df_london <-
-  cbind.data.frame(GSMID = names(london_metadata@gsms),
-                   t(infos_london))
-rownames(infos_df_london) <- names(london_metadata@gsms)
+# Build a data frame of sample information (one row per sample) for one cohort
+build_info_df <- function(meta) {
+  infos <- sapply(seq_along(meta@gsms), FUN = get_info, meta = meta)
+  infos_df <- cbind.data.frame(GSMID = names(meta@gsms), t(infos))
+  rownames(infos_df) <- names(meta@gsms)
+  infos_df
+}
+
+infos_df_london <- build_info_df(london_metadata)
 colnames(infos_df_london)[-1] <-
   c("Cohort", "Location", "Set", "Status", "SampleName")
 
-infos_southafrica <-
-  sapply(1:length(southafrica_metadata@gsms),
-         FUN = get_info,
-         meta = southafrica_metadata)
-infos_df_southafrica <-
-  cbind.data.frame(GSMID = names(southafrica_metadata@gsms),
-                   t(infos_southafrica))
-rownames(infos_df_southafrica) <- names(southafrica_metadata@gsms)
+infos_df_southafrica <- build_info_df(southafrica_metadata)
 colnames(infos_df_southafrica)[-1] <-
   c("Cohort", "Location", "Set", "Status", "SampleName")
 
-infos_leicester <-
-  sapply(1:length(leicester_metadata@gsms),
-         FUN = get_info,
-         meta = leicester_metadata)
-infos_df_leicester <-
-  cbind.data.frame(GSMID = names(leicester_metadata@gsms),
-                   t(infos_leicester))
-rownames(infos_df_leicester) <- names(leicester_metadata@gsms)
+# In the Leicester metadata, Status comes before Set, so we reorder the
+# columns to match the other two cohorts
+infos_df_leicester <- build_info_df(leicester_metadata)
 colnames(infos_df_leicester)[-1] <-
-  c("Cohort", "Location", "Status", "Set",
-    "SampleName")
+  c("Cohort", "Location", "Status", "Set", "SampleName")
 infos_df_leicester <- infos_df_leicester[, c(1, 2, 3, 5, 4, 6)]
 ```
 
@@ -253,7 +242,8 @@ infos_df_leicester <- infos_df_leicester[, c(1, 2, 3, 5, 4, 6)]
 infos_all <-
   rbind.data.frame(infos_df_london, infos_df_southafrica, infos_df_leicester)
 
-# Bind the counts for London, SA, and Leicester together
+# Merge the counts for London, SA, and Leicester, matching on the first 3 columns
+# (the gene identifiers : Genes, Gene_name, Gene_biotype)
 counts_merged <-
   merge(
     x = merge(x = london_raw, y = southafrica_raw, by = c(1:3)),
@@ -261,27 +251,30 @@ counts_merged <-
     by = c(1:3)
   ) %>% select(-Gene_name, -Gene_biotype)
 
-# pivot to wide format
-counts_all <- t(counts_merged)[-1,] %>% as.data.frame()
+# Pivot to wide format : transpose so that samples are rows (the first row, which contains the gene names, is dropped)
+counts_all <- t(counts_merged)[-1, ] %>% as.data.frame()
 
 # Columns are genes
-colnames(counts_all) = counts_merged$Genes
+colnames(counts_all) <- counts_merged$Genes
 
 # Rows are samples
-rownames(counts_all) = 1:dim(counts_all)[1]
+rownames(counts_all) <- seq_len(nrow(counts_all))
 
 # Now we merge the counts with the metadata by the sample name
-merged_all = merge(
+merged_all <- merge(
   y = bind_cols("SampleName" = colnames(counts_merged)[-1], counts_all),
   x = infos_all,
   by = "SampleName"
 ) %>% distinct()
 
-# here we extract the counts and store them as numeric values in the dataframe
-counts_all = merged_all %>% select(-c(1:6)) %>% sapply(as.numeric) %>% as.data.frame()
+# The metadata columns of the merged dataframe
+metadata_cols <- c("SampleName", "GSMID", "Cohort", "Location", "Set", "Status")
 
-# Here we extract the metadata
-metadata_all = merged_all %>% select(c(1:6))
+# Extract the counts and store them as numeric values in the dataframe
+counts_all <- merged_all %>% select(-all_of(metadata_cols)) %>% sapply(as.numeric) %>% as.data.frame()
+
+# Extract the metadata
+metadata_all <- merged_all %>% select(all_of(metadata_cols))
 
 # Visualise the start of the merged dataframe
 merged_all[, c(1:8)] %>% head(5)
@@ -298,10 +291,10 @@ merged_all[, c(1:8)] %>% head(5)
 count_sums <- colSums(counts_all)
 
 # Unexpressed genes are those without a single count across samples
-unexpressed_genes = colnames(counts_all)[count_sums == 0]
+unexpressed_genes <- colnames(counts_all)[count_sums == 0]
 
 # Remove these from the data
-counts_all_filtered = counts_all %>% 
+counts_all_filtered <- counts_all %>% 
   select(-all_of(unexpressed_genes))
 
 # how many genes were removed?
@@ -313,22 +306,22 @@ message(paste0(
 
 ## 1b) Remove non-protein coding genes
 
-> Many investigators only include protein-coding genes in their analysis. Information on whether a gene is protein coding or not may be found in the raw counts under the Gene_biotype columns. For example, 
+> Many investigators only include protein-coding genes in their analysis. Information on whether a gene is protein coding or not may be found in the raw counts under the Gene_biotype columns. For example, the first biotype values for the London data are:
 
 ```{r}
 london_raw$Gene_biotype %>% head()
 ```
 
-> Using this information, filter the counts to only include genes who are protein-coding. Report the amount of genes removed at this stage. 
+> Using this information, filter the counts to only include genes that are protein-coding. Report the number of genes removed at this stage. 
 
 ```{r}
 # Use the london data to extract the names of the protein-coding genes
-non_protein_coding_genes = london_raw %>%
+non_protein_coding_genes <- london_raw %>%
   filter(Gene_biotype != "protein_coding") %>%
   pull(Genes)
 
 # De-select non-protein-coding genes from the counts matrix
-counts_all_filtered_proteincoding = counts_all_filtered %>%
+counts_all_filtered_proteincoding <- counts_all_filtered %>%
   select(!any_of(non_protein_coding_genes))
 
 # how many genes were removed?
@@ -350,7 +343,7 @@ keep <-
 rm(list = setdiff(ls(), keep))
 
 # Garbage collection to clear unused memory
-gc()
+invisible(gc())
 ```
 
 # 2) Normalisation 
@@ -361,46 +354,59 @@ gc()
 
 > The library size of a sample is the total number of counts across all genes. Compute the library sizes and visualise them on a bar chart using `ggplot2`. Colour the samples by the study from which it came. What do you notice? 
 
+> This is the first figure we make, so save it in your `output` folder using `ggsave()`, with `here()` to build the path (e.g. `here("output", "library_sizes.png")`). Do this for every figure you want to keep.
+
 ```{r}
 # Create a new dataframe to store the library sizes, the sample identifier, and the study name
-library_sizes <-
-  bind_cols(
-    "library_size" = counts_all_filtered_proteincoding %>% rowSums(),
-    "SampleNameShort" = metadata_all$SampleName,
-    "Location" = metadata_all$Location
-  ) %>% as.data.frame()
+library_sizes <- data.frame(
+  library_size = rowSums(counts_all_filtered_proteincoding),
+  SampleName = metadata_all$SampleName,
+  Location = metadata_all$Location
+)
 
 # Use ggplot to visualise these as a bar chart coloured by study
-ggplot(library_sizes,
-       aes(x = SampleNameShort, y = library_size, fill = Location)) +
+library_sizes_plot <-
+  ggplot(library_sizes,
+         aes(x = SampleName, y = library_size, fill = Location)) +
   geom_col() +
   theme_minimal() +
   theme(axis.text.x = element_blank()) +
-  labs(x = "Sample", y = "Library Size", fill = "Location") +
+  labs(x = "Sample", y = "Library Size") +
   ggtitle("Library Sizes by Sample and Location")
+
+# Save the figure in the output folder
+ggsave(
+  filename = here("output", "library_sizes.png"),
+  plot = library_sizes_plot,
+  width = 10,
+  height = 6
+)
+
+# Display the figure
+library_sizes_plot
 ```
 
-> There are differences both between individuals and between studies in terms of sample size. Therefore, these samples are not comparable without normalisation. 
+> **Answer:** There are differences in library size both between individuals and between studies. Therefore, these samples are not comparable without normalisation. 
 
 ## 2b) Log2-CPM normalisation
 
 > A simple way to address the library size problem is simply to normalise the raw integer counts by dividing by the library size. The variant of this approach which is often used is a transformation called *counts-per-million*. This is calculated by first dividing each count by its sample's library size, then multiplying by a million. 
 
-> Using the `cpm()` (counts-per-million) function from the `edgeR` with the `log = TRUE` argument, compute the log2-CPM of these data. 
+> Using the `cpm()` (counts-per-million) function from the `edgeR` package with the `log = TRUE` argument, compute the log2-CPM of these data. 
 
 > Principal component analysis is a useful tool for representing the data in a lower-dimensional space while preserving signals which contribute to between-sample variability. Perform a PCA using the `prcomp()` function. Plot the samples on the first two principal components, coloured by location. Has this normalisation step removed the study-effect?
 
 ```{r}
-# Make a DGEList object with the raw counts
+# Make a DGEList object with the raw counts (DGEList expects genes in rows, so we transpose)
 dge <- DGEList(t(counts_all_filtered_proteincoding))
 
-# Convert the raw counts into Log2-CPM-TMM
-counts_log2_cpm_tmm <-
+# Convert the raw counts into Log2-CPM
+counts_log2_cpm <-
   cpm(dge, log = TRUE) %>% t() %>% as.data.frame()
 
 # Perform PCA on the cpm counts
 pca_res <-
-  prcomp(counts_log2_cpm_tmm,
+  prcomp(counts_log2_cpm,
          center = TRUE,
          scale. = TRUE)
 
@@ -426,10 +432,10 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = Location)) +
 
 ## 2c) Log2-CPM-TMM Normalisation
 
-> Another typical normalisation approach is to use the *trimmed mean of moments* (TMM) method. Calculate the normalisation factors on the raw counts data using the `calcNormFactors()` function in `edgeR` with the argument `method = "TMM"`applied to a `DGEList()` object. Then, convert this object into log2CPM using the `cpm()` function as before. Using your previous code, plot the points on the first two principal components, coloured by location. Has this normalisation step solved the problem?
+> Another typical normalisation approach is to use the *trimmed mean of M-values* (TMM) method. Calculate the normalisation factors on the raw counts data using the `calcNormFactors()` function in `edgeR` with the argument `method = "TMM"` applied to a `DGEList()` object. Then, convert this object into log2CPM using the `cpm()` function as before. Using your previous code, plot the points on the first two principal components, coloured by location. Has this normalisation step solved the problem?
 
 ```{r}
-# Make a DGEList object with the raw counts
+# Make a DGEList object with the raw counts (genes in rows, so we transpose)
 dge_list <- DGEList(t(counts_all_filtered_proteincoding))
 
 # Calculate the normalisation factors with TMM
@@ -467,12 +473,14 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = Location)) +
 
 ## 2d) Batch effect correction
 
-> Even after normalisation, we appear to still have a study-effect. We could view the study as a batch variable, since we do not expect it to contribute much to the heterogeneity between samples. To correct for batch effects in RNA-seq data, we can use the *combat-seq* method. We do this using the `ComBat_seq()` function from the `sva` package. 
+> **Answer:** Even after normalisation, there is still a study effect.
 
-> In this method, we must specify two things. Firstly, the batch variable (`Location`), and secondly, a variable whose effects we want to remain intact after correction (in this case, the `Status` variable, which provides information on the disease states of the patients). Apply `ComBat_seq()` to the raw, filtered counts to correct for the `batch = Location`, while keeping preserved effects from `group = metadata_all$Status`. NB : running combat-seq may take a couple of minutes. 
+> We can view the study as a batch variable, since we do not expect it to contribute much to the heterogeneity between samples. To correct for batch effects in RNA-seq data, we can use the *ComBat-Seq* method. We do this using the `ComBat_seq()` function from the `sva` package. 
+
+> In this method, we must specify two things. Firstly, the batch variable (`Location`), and secondly, a variable whose effects we want to remain intact after correction (in this case, the `Status` variable, which provides information on the disease states of the patients). Apply `ComBat_seq()` to the raw, filtered counts to correct for the `batch = Location`, while keeping preserved effects from `group = metadata_all$Status`. NB : running ComBat-Seq may take a couple of minutes. 
 
 ```{r}
-# Run ComBat-Seq
+# Run ComBat-Seq (it expects genes in rows, so we transpose)
 counts_combat <-
   ComBat_seq(
     counts = t(counts_all_filtered_proteincoding),
@@ -481,7 +489,7 @@ counts_combat <-
   )
 ```
 
-> Now that we have attempted to correct for the batch effect in the raw counts, use your previous code to normalise the data using Log2-CPM-TMM. Now visualise the data on the first two principal components and conlcude if there still remains a study effect in the data. 
+> Now that we have attempted to correct for the batch effect in the raw counts, use your previous code to normalise the data using Log2-CPM-TMM. Now visualise the data on the first two principal components and conclude if there still remains a study effect in the data. 
 
 ```{r}
 # Make a DGEList object with the raw counts
@@ -533,7 +541,7 @@ keep <-
 rm(list = setdiff(ls(), keep))
 
 # Garbage collection to clear unused memory
-gc()
+invisible(gc())
 ```
 
 # 3) Data Exploration
@@ -567,13 +575,13 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = Status)) +
     x = paste0("PC1 (", round(summary(pca_res)$importance[2, 1] * 100, 1), "%)"),
     y = paste0("PC2 (", round(summary(pca_res)$importance[2, 2] * 100, 1), "%)"),
     color = "Status",
-    title = "PCA of raw counts"
+    title = "PCA of batch-corrected, log2-CPM-TMM-transformed data"
   )
 ```
 
 ## 3b) Hierarchical clustering
 
-> In addition, we can explore signal in the data using hierachical clustering algorithms. Here, the goal is to determine which samples are similar and which are different. If these similarities and/or differences can be explained by the disease state, it suggests a signal might be present. 
+> In addition, we can explore signal in the data using hierarchical clustering algorithms. Here, the goal is to determine which samples are similar and which are different. If these similarities and/or differences can be explained by the disease state, it suggests a signal might be present. 
 
 > Using the `hclust()` function from the `flashClust` package, perform an agglomerative hierarchical clustering algorithm on the gene expression with *Euclidean distance* and *complete linkage*. Compute the resulting dendrogram with the `as.dendrogram()` function. Find a way to colour the sample labels by the `Status` variable. 
 
@@ -636,8 +644,8 @@ ggplot() +
     size = 3
   ) +
   theme_minimal(base_size = 20) +
-  scale_color_manual(values = c("blue", "red", "green", "orange", "purple")) +  # Customize as needed
-  labs(title = "Hierarchical Clustering Dendrogram of Gene Expression Data, Coloured by Disease State", x = "Samples", y = "Height") +
+  scale_color_brewer(palette = "Set1") +
+  labs(title = "Hierarchical clustering of samples (complete linkage)", x = "Samples", y = "Height", color = "Status") +
   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
 ```
 
@@ -655,7 +663,7 @@ Status <- metadata_all$Status
 distance_matrix <-
   dist(counts_combat_log2_cpm_tmm, method = "euclidean")
 
-# Perform complete linkage hierarchical clustering with hclust()
+# Perform Ward hierarchical clustering with hclust()
 hclust_result <- hclust(distance_matrix, method = "ward")
 
 # Compute the dendrogram
@@ -700,12 +708,13 @@ ggplot() +
     size = 3
   ) +
   theme_minimal(base_size = 20) +
-  scale_color_manual(values = c("blue", "red", "green", "orange", "purple")) +  # Customize as needed
-  labs(title = "Hierarchical Clustering Dendrogram of Gene Expression Data, Coloured by Disease State", x = "Samples", y = "Height") +
+  scale_color_brewer(palette = "Set1") +
+  labs(title = "Hierarchical clustering of samples (Ward linkage)", x = "Samples", y = "Height", color = "Status") +
   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
 ```
 
-Now clear the enrivonment of useless data again. 
+> Now clear the environment of useless data again. 
+
 ```{r}
 # Here we list the objects to keep
 keep <-
@@ -717,7 +726,7 @@ keep <-
 rm(list = setdiff(ls(), keep))
 
 # Garbage collection to clear unused memory
-gc()
+invisible(gc())
 ```
 
 # 4) Differential Gene Expression Analysis
@@ -726,15 +735,15 @@ gc()
 
 ## 4a) EdgeR
 
-> We will be following the edgeR pipeline, [found here](https://www.bioconductor.org/packages//2.11/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf).
+> We will be following the edgeR pipeline, [found here](https://www.bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf).
 
-> edgeR starts with raw integer counts. We can use the counts from ComBat-Seq (prior to normalisation). Starting from a DGEList object, follow the edgeR pipeline. This starts with estimating TMM normalisation factors with `calcNormFactors()`. Then, we estimate common dispersion factors using `estimateCommonDisp()`. The negative binomial model can be fit with `glmQLFit()`. P-values can be extracted with `glmQLFTest()`, and the top genes can be extracted using the `topTags()` function. 
+> edgeR starts with raw integer counts. We can use the counts from ComBat-Seq (prior to normalisation). Starting from a DGEList object, follow the edgeR pipeline. This starts with estimating TMM normalisation factors with `calcNormFactors()`. Then, we estimate a common dispersion using `estimateCommonDisp()`. The negative binomial model can be fit with `glmQLFit()`. P-values can be extracted with `glmQLFTest()`, and the top genes can be extracted using the `topTags()` function. 
 
-> Extract a vector of gene names which have adjusted p-value < 0.05, as well as |log2-Fold-Change > 1|.
+> Extract a vector of gene names which have adjusted p-value < 0.05, as well as |log2-fold-change| > 1.
 
 ```{r}
 # Define a new column testGroup which groups together LTBI and control patients into one control group
-metadata_all = metadata_all %>%
+metadata_all <- metadata_all %>%
   mutate(testGroup = recode_factor(Status, "LTBI" = "Control")) %>%
   relocate(testGroup, .after = Status)
 
@@ -772,9 +781,10 @@ message(paste0(
 ))
 ```
 
-> Repeat the previous experiment, but instead of estimating a common dispersion factor, estimate one for each gene using the `estimateDisp()` function. Do the results change significantly?. 
+> Repeat the previous experiment, but instead of estimating a common dispersion factor, estimate one for each gene using the `estimateDisp()` function. Do the results change significantly? 
 
 ```{r}
+# Estimate a dispersion for each gene
 dge_edgeR_genewise <- estimateDisp(dge, design)
 
 # Fit the quasi-likelihood GLM
@@ -808,9 +818,10 @@ message(
 
 > Now, we will perform the same task using voom-limma. A tutorial can be [found here](https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/thursday/DE.html).
 
-> Following the guide, apply the Voom-limma pipeline with the functions `voom()`, `lmFit()`, `eBayes()` and `decideTests()`. The output should be a vector giving the names of the differentially expressed genes defined by adjusted p-value < 0.05 and |log2-Fold-Change > 1|.
+> Following the guide, apply the Voom-limma pipeline with the functions `voom()`, `lmFit()`, `eBayes()` and `decideTests()`. The output should be a vector giving the names of the differentially expressed genes defined by adjusted p-value < 0.05 and |log2-fold-change| > 1.
 
 ```{r}
+# Define a DGEList object with the ComBat-Seq corrected counts
 dge <-
   DGEList(counts = counts_combat,
           group = metadata_all$testGroup)
@@ -830,7 +841,7 @@ fit_voom <- lmFit(v, design)
 # Perform empirical Bayes tests
 fit_voom <- eBayes(fit_voom, robust = TRUE)
 
-# Determine significance of tests
+# Count the up- and down-regulated genes (adjusted p-value < 0.05, |log2FC| > 1)
 voomlimma_signif <-
   decideTests(fit_voom,
               adjust.method = "BH",
@@ -839,12 +850,15 @@ voomlimma_signif <-
 summary(voomlimma_signif)
 
 # Put the results in a dataframe and find significant gene names
-results_voom = topTable(fit_voom, coef = 2, n = Inf) %>% as.data.frame()
+results_voom <- topTable(fit_voom, coef = 2, n = Inf) %>% as.data.frame()
 
-genelist_voomlimma = results_voom %>% filter(adj.P.Val < 0.05, abs(logFC) > 1) %>% rownames()
+genelist_voomlimma <- results_voom %>% filter(adj.P.Val < 0.05, abs(logFC) > 1) %>% rownames()
 
 # How many genes were significantly differentially expressed?
-genelist_voomlimma %>% length()
+message(paste0(
+  genelist_voomlimma %>% length(),
+  " differentially expressed genes found."
+))
 ```
 
 ## 4c) dearseq
@@ -856,34 +870,42 @@ genelist_voomlimma %>% length()
 ```{r}
 res_dearseq <-
   dear_seq(
+    # Log2-CPM-TMM data, with genes in rows
     exprmat = as.matrix(t(counts_combat_log2_cpm_tmm)),
+    # The variable to test (ActiveTB vs control)
     variables2test = design[, "testGroupActiveTB", drop = FALSE],
+    # The variables to adjust for (here, only the intercept)
     covariates = design[, "(Intercept)", drop = FALSE],
     which_test = "asymptotic",
+    # The data are already normalised and log2-transformed
     preprocessed = TRUE
   )
 
-# Extract the log2FC from the edgeR analysis
-logFC <- fit_edgeR$coefficients[, 2]
+# Extract the log2FC from the edgeR analysis (same gene order as the dearseq input)
+logFC <- qlf$table$logFC
+names(logFC) <- rownames(qlf$table)
 
 # Compute significantly DE genes
-dearseq_signif <- res_dearseq$pvals$adjPval < 0.05 & logFC > 1
+dearseq_signif <- res_dearseq$pvals$adjPval < 0.05 & abs(logFC) > 1
 
 genelist_dearseq <- names(dearseq_signif[dearseq_signif == TRUE])
 
-# how many differentially expressed genes?
-genelist_dearseq %>% length()
+# How many genes were significantly differentially expressed?
+message(paste0(
+  genelist_dearseq %>% length(),
+  " differentially expressed genes found."
+))
 ```
 
 ## 4d) Volcano plot
 
-> A common representation of the results of DGEA is in the form of a so-called [*volcano plot*](https://olvtools.com/en/rnaseq/help/volcano-plot). The x-axis of a volcano plot is the log2FC value and the y-axis is the adjusted p-values on the log10 scale, with the axis inverted such that smaller p-values are greater on the y-axis. Typically, the ad-hoc limits which define differential expression (e.g. adjusted p-value < 0.05 and log2FC > 1 in our case) are represented by lines on the plot. Significantly up-regulated genes are coloured as red and significantly down-regulated genes as blue. Sometimes, the few most significant genes are given labels showing their name. 
+> A common representation of the results of DGEA is in the form of a so-called [*volcano plot*](https://olvtools.com/en/rnaseq/help/volcano-plot). The x-axis of a volcano plot is the log2FC value and the y-axis is the adjusted p-values on the log10 scale, with the axis inverted such that smaller p-values are greater on the y-axis. Typically, the ad-hoc limits which define differential expression (e.g. adjusted p-value < 0.05 and |log2FC| > 1 in our case) are represented by lines on the plot. Significantly up-regulated genes are coloured as red and significantly down-regulated genes as blue. Sometimes, the few most significant genes are given labels showing their name. 
 
 > Choose one of your analysis pipelines, and make a volcano plot to represent the results. Annotate the top 10 most significantly differentially expressed genes (by adjusted p-value) on the plot. 
 
 ```{r}
 # EdgeR volcano plot
-volcano_results = results_edgeR %>% mutate(gene_name = rownames(results_edgeR)) %>% select(gene_name, FDR, logFC)
+volcano_results <- results_edgeR %>% mutate(gene_name = rownames(results_edgeR)) %>% select(gene_name, FDR, logFC)
 
 volcano_results <- volcano_results %>%
   mutate(
@@ -895,7 +917,7 @@ volcano_results <- volcano_results %>%
   )
 
 top_10_genes <- volcano_results %>%
-  filter(logFC > 1) %>%
+  filter(expression != "Not significant") %>%
   arrange(FDR) %>%
   head(10)
 
@@ -948,7 +970,7 @@ volcano_plot
 
 ```{r}
 # Voom volcano plot
-volcano_results = results_voom %>% mutate(gene_name = rownames(results_voom)) %>% select(gene_name, adj.P.Val, logFC)
+volcano_results <- results_voom %>% mutate(gene_name = rownames(results_voom)) %>% select(gene_name, adj.P.Val, logFC)
 
 volcano_results <- volcano_results %>%
   mutate(
@@ -960,7 +982,7 @@ volcano_results <- volcano_results %>%
   )
 
 top_10_genes <- volcano_results %>%
-  filter(logFC > 1) %>%
+  filter(expression != "Not significant") %>%
   arrange(adj.P.Val) %>%
   head(10)
 
@@ -1013,10 +1035,10 @@ volcano_plot
 
 ```{r}
 # dearseq volcano plot
-results_dearseq = data.frame("adjPval" = res_dearseq$pvals$adjPval,
-                             "logFC" = fit_edgeR$coefficients[, 2])
+results_dearseq <- data.frame("adjPval" = res_dearseq$pvals$adjPval,
+                              "logFC" = logFC)
 
-volcano_results = results_dearseq %>% mutate(gene_name = rownames(results_dearseq)) %>% select(gene_name, adjPval, logFC)
+volcano_results <- results_dearseq %>% mutate(gene_name = rownames(results_dearseq)) %>% select(gene_name, adjPval, logFC)
 
 volcano_results <- volcano_results %>%
   mutate(
@@ -1028,7 +1050,7 @@ volcano_results <- volcano_results %>%
   )
 
 top_10_genes <- volcano_results %>%
-  filter(logFC > 1) %>%
+  filter(expression != "Not significant") %>%
   arrange(adjPval) %>%
   head(10)
 
@@ -1086,6 +1108,9 @@ volcano_plot
 > First, use the `VennDiagram` package to visualise the agreement between the methods. 
 
 ```{r}
+# Stop VennDiagram from writing a log file in the working directory
+futile.logger::flog.threshold(futile.logger::ERROR, name = "VennDiagramLogger")
+
 # Create a Venn Diagram
 venn.plot <- venn.diagram(
   x = list(
@@ -1096,24 +1121,31 @@ venn.plot <- venn.diagram(
   category.names = c("Voom-Limma", "EdgeR", "dearseq"),
   filename = NULL,
   output = TRUE,
-  fill = c("red", "blue", "green"),
-  # Set colors for each set
-  alpha = 0.5,
-  # Set transparency of the fills
-  lwd = 2,
-  # Set line width of the circles
-  col = "black",
-  # Set line color for the circles
-  cex = 2,
-  # Adjust text size
-  fontface = "bold",
-  # Make text bold
+  fill = c("red", "blue", "green"),  # Colour of each set
+  alpha = 0.5,                       # Transparency of the fills
+  lwd = 2,                           # Line width of the circles
+  col = "black",                     # Line colour of the circles
+  cex = 2,                           # Text size
+  fontface = "bold",                 # Bold text
   fontfamily = "sans"
 )
 
 # plot the Venn diagram in a new page
 grid.newpage()  # Ensure the plot starts fresh
 grid.draw(venn.plot)
+```
+
+> How many genes are identified by all three methods? Do the methods broadly agree?
+
+```{r}
+# Genes identified by all three methods
+genes_all_methods <- Reduce(intersect,
+                            list(genelist_voomlimma, genelist_edgeR, genelist_dearseq))
+
+message(paste0(
+  length(genes_all_methods),
+  " genes were identified by all three methods."
+))
 ```
 
 > An alternative way to visualise agreement is with a so-called UpSet plot. This representation works well when the number of classes to compare is greater than 3, such that a Venn diagram becomes hard to view. Using the `UpSetR` package, make an UpSet diagram. Do our 3 pipelines have concordant results? 
