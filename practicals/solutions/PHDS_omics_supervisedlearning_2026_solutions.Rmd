@@ -290,13 +290,16 @@ plot_train
 
 > The predictions above are made on the data which was used to fit the model, so they say nothing about how the model would perform on new participants. The simplest way to evaluate the model on *unseen* data is a **train-test split**. Observations are randomly assigned to either the training set or the testing set. A model is trained on the training set, and used to predict on the unseen testing set. The predictions can then be compared to their true values to obtain an unbiased estimate of the model's performance.
 
-> Randomly select 70% of the participants as the training set (hint : the `sample()` function), and keep the remaining 30% as the testing set. Fit the same ridge regression model (`lambda = 1`) on the training set only, and predict the response of the testing set. Compute the same two metrics on the testing set, and plot the predictions.
+> Randomly select 70% of the participants as the training set (hint : the `sample()` function), and keep the remaining 30% as the testing set. Fit the same ridge regression model (`lambda = 1`) on the training set only, and predict the response of the testing set. Compute the same two metrics on the testing set, and plot the predictions. To make your results reproducible (and identical to mine), set the seed with `set.seed(123)` just before you sample the participants.
 
 > How do the results compare with those of 1a? What does this tell us?
 
 <!-- solution:code -->
 ```{r}
 n <- nrow(X_mat)
+
+# Set the seed, so that the random split is reproducible
+set.seed(123)
 
 # Randomly select 70% of the participants for training, and keep the others for testing
 train_idx <- sample(n, size = round(0.7 * n))
@@ -327,10 +330,13 @@ plot_test
 
 > The train-test split uses the data inefficiently : only 30% of the participants are predicted, and the result depends on the random split. **K-fold cross-validation** is a better alternative. Here, we first split the data into K distinct *folds* (partitions of the data). Cross-validation is a loop, where in each stage, a different fold is chosen to act as the testing set, and a model is trained on all the other folds. Therefore, K-fold cross-validation results in a series of K models, and in a prediction on unseen data for **every** participant. In this section, we are going to improve on our previous train-test split by implementing 10-fold CV. 
 
-> First, create the folds with the `createFolds()` function (use the arguments `k = 10` and `list = TRUE`, which gives a list containing the indices of the participants in each fold). 
+> First, create the folds with the `createFolds()` function (use the arguments `k = 10` and `list = TRUE`, which gives a list containing the indices of the participants in each fold). Set the seed with `set.seed(123)` just before creating the folds.
 
 <!-- solution:code -->
 ```{r}
+# Set the seed, so that the random folds are reproducible
+set.seed(123)
+
 # Create the 10 folds : a list containing, for each fold, the indices of the participants in it
 folds <- createFolds(y_vec, k = 10, list = TRUE, returnTrain = FALSE)
 ```
@@ -387,7 +393,7 @@ plot_cv
 >
 > The result of `train()` is a model which has been fitted on all the training data with the best hyperparameters. It can be used with `predict()` as before (with the testing predictors as the argument `newdata`), and the best hyperparameters are stored in its element `$bestTune`.
 
-> You are going to add 5-fold hyperparameter tuning in the ridge regression CV you implemented above. All this will require is to replace the call to `glmnet()` above with a call to `caret::train()`, using the arguments `method = "glmnet"`, `tuneGrid = ridge_grid`, and `trControl = trainControl(method = "cv", number = 5)`. As before, you may make predictions in the test set with the `predict()` function. Also, store the tuned values of the hyperparameter **lambda**, extracted from the `bestTune$lambda` of the `caret::train()` object. You may use the grid of hyperparameter options suggested below as inputs. 
+> You are going to add 5-fold hyperparameter tuning in the ridge regression CV you implemented above. All this will require is to replace the call to `glmnet()` above with a call to `caret::train()`, using the arguments `method = "glmnet"`, `tuneGrid = ridge_grid`, and `trControl = trainControl(method = "cv", number = 5)`. As before, you may make predictions in the test set with the `predict()` function. Also, store the tuned values of the hyperparameter **lambda**, extracted from the `bestTune$lambda` of the `caret::train()` object. You may use the grid of hyperparameter options suggested below as inputs (its values are spread over several orders of magnitude, since lambda acts on a multiplicative scale). The inner cross-validation folds are chosen randomly by `caret`, so set the seed with `set.seed(123)` just before the `for` loop. 
 
 ```{r}
 lambda_grid <- c(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 3, 4, 5, 10, 20, 50, 100)
@@ -401,6 +407,9 @@ ridge_grid = expand.grid(alpha = 0, lambda = lambda_grid)
 
 <!-- solution:code -->
 ```{r}
+# Set the seed, so that the random inner folds are reproducible
+set.seed(123)
+
 pred_ridge_tuned <- rep(NA_real_, n)
 best_lambda_ridge_tuned <- rep(NA_real_, length(folds))
 
@@ -440,14 +449,19 @@ plot_ridge_tuned
 
 # 4) Other models
 
-> Now that you have a nested cross-validation framework with `caret`, it is easy to try other models : you only need to change the `method` and the `tuneGrid`. For each of the following models, repeat your code from the previous section (with the same outer folds), and choose the hyperparameter values to try yourselves. Compute the metrics, plot the predictions, and save the figure. To compare the models later, store the predictions and metrics of each model in objects with distinct names (e.g. `pred_lasso` and `metrics_lasso`).
+> Now that you have a nested cross-validation framework with `caret`, it is easy to try other models : you only need to change the `method` and the `tuneGrid`. For each of the following models, repeat your code from the previous section (with the same outer folds), and choose the hyperparameter values to try yourselves. Compute the metrics, plot the predictions, and save the figure. To compare the models later, store the predictions and metrics of each model in objects with distinct names (e.g. `pred_lasso` and `metrics_lasso`). As before, set the seed with `set.seed(123)` just before each `for` loop.
+
+> **How should you choose a hyperparameter grid?** There is no rule, and a grid is always somewhat arbitrary, but here is some practical advice. (1) Start with a small, coarse grid : every extra value multiplies the computation time (the number of models fitted is the number of rows of the grid, times 5 inner folds, times 10 outer folds). (2) For penalty parameters such as lambda, which act on a multiplicative scale, use values spread over several orders of magnitude (e.g. 0.001, 0.01, 0.1, 1, 10) rather than evenly spaced values. (3) After tuning, look at the selected values (the `$bestTune` of the `train()` object) : if a selected value is at the edge of your grid, the best value may lie beyond it, so extend the grid in that direction. Each model below comes with an example grid to start from.
 
 ## 4a) Lasso regression
 
-> Lasso regression is another regularised method which has the advantage over ridge regression that it can reduce model coefficients fully to 0. It is implemented in the `"glmnet"` method with `alpha = 1`. The hyperparameter to tune is `lambda`.
+> Lasso regression is another regularised method which has the advantage over ridge regression that it can reduce model coefficients fully to 0. It is implemented in the `"glmnet"` method with `alpha = 1`. The hyperparameter to tune is `lambda`. For example, you could use the grid `expand.grid(alpha = 1, lambda = c(0.001, 0.01, 0.1, 1, 10))`.
 
 <!-- solution:code -->
 ```{r}
+# Set the seed, so that the random inner folds are reproducible
+set.seed(123)
+
 pred_lasso <- rep(NA_real_, n)
 
 for (i in seq_along(folds)) {
@@ -477,10 +491,13 @@ plot_lasso
 
 ## 4b) Elastic net regression
 
-> Elastic net regression combines the ridge and lasso penalties. It is also implemented in the `"glmnet"` method, but this time the hyperparameter `alpha` can take values between 0 (ridge) and 1 (lasso), and is tuned together with `lambda`.
+> Elastic net regression combines the ridge and lasso penalties. It is also implemented in the `"glmnet"` method, but this time the hyperparameter `alpha` can take values between 0 (ridge) and 1 (lasso), and is tuned together with `lambda`. For example, you could use the grid `expand.grid(alpha = c(0, 0.5, 1), lambda = c(0.01, 0.1, 1, 10))`, which contains all the combinations of the values of `alpha` and `lambda`.
 
 <!-- solution:code -->
 ```{r}
+# Set the seed, so that the random inner folds are reproducible
+set.seed(123)
+
 pred_enet <- rep(NA_real_, n)
 
 # Both alpha and lambda are tuned : the grid contains all their combinations
@@ -513,10 +530,13 @@ plot_enet
 
 ## 4c) Principal component regression
 
-> Principal component regression (PCR) first computes the principal components of the predictors, and then regresses the response on the first few components. It is implemented in the `"pcr"` method (package `pls`). The hyperparameter to tune is the *number of components to keep*, `ncomp`. Note that it cannot be larger than the number of participants in the training set.
+> Principal component regression (PCR) first computes the principal components of the predictors, and then regresses the response on the first few components. It is implemented in the `"pcr"` method (package `pls`). The hyperparameter to tune is the *number of components to keep*, `ncomp`. Note that it cannot be larger than the number of participants in the training set. For example, you could use the grid `data.frame(ncomp = c(1, 5, 10, 20))`.
 
 <!-- solution:code -->
 ```{r}
+# Set the seed, so that the random inner folds are reproducible
+set.seed(123)
+
 pred_pcr <- rep(NA_real_, n)
 
 # The numbers of components to try
@@ -549,10 +569,13 @@ plot_pcr
 
 ## 4d) Partial least squares regression
 
-> Partial least squares (PLS) regression is similar to PCR, but the components are chosen to explain the covariance between the predictors and the response, rather than the variance of the predictors only. It is implemented in the `"pls"` method. Again, the hyperparameter to tune is the number of components to keep, `ncomp`.
+> Partial least squares (PLS) regression is similar to PCR, but the components are chosen to explain the covariance between the predictors and the response, rather than the variance of the predictors only. It is implemented in the `"pls"` method. Again, the hyperparameter to tune is the number of components to keep, `ncomp`. You could use the same example grid as for PCR : `data.frame(ncomp = c(1, 5, 10, 20))`.
 
 <!-- solution:code -->
 ```{r}
+# Set the seed, so that the random inner folds are reproducible
+set.seed(123)
+
 pred_pls <- rep(NA_real_, n)
 
 for (i in seq_along(folds)) {
@@ -587,9 +610,14 @@ plot_pls
 > - `mtry` : the number of genes randomly considered at each split. This is the main hyperparameter to tune; it must be at most the number of genes.
 > - `splitrule` : the criterion to split the nodes. For a regression, use `"variance"`.
 > - `min.node.size` : the minimum number of participants in a terminal node of a tree (e.g. 5 or 10).
+>
+> For example, you could use the grid `expand.grid(mtry = c(50, 200), splitrule = "variance", min.node.size = c(5, 10))`.
 
 <!-- solution:code -->
 ```{r}
+# Set the seed, so that the random inner folds are reproducible
+set.seed(123)
+
 pred_rf <- rep(NA_real_, n)
 
 rf_grid <- expand.grid(
@@ -658,5 +686,5 @@ model_metrics
 > Let's say we choose the *best model* by that which produced the best predictions in our cross-validation framework. Comment on how this strategy could introduce bias into our results.
 
 <!-- solution:text -->
-> **Answer:** 
+> **Answer:** Choosing the model with the best cross-validated performance, and then reporting that performance as our estimate of how well it would predict new participants, is over-optimistic. The cross-validated metrics are noisy estimates, which depend on the particular participants and on the random folds. The best of several noisy estimates is, on average, better than its true performance : the model that comes out on top is partly the model that was lucky on these data. The more models (and hyperparameter values) we compare, the larger this bias. It is the same problem as tuning the hyperparameters and evaluating the model on the same data, as in section 3, but now at the level of the choice of the model : the data which are used to select the model are also used to evaluate it. In our case, the models have very similar performances, so the apparent advantage of the best model could easily be due to chance. To obtain an unbiased estimate of the performance of the whole procedure, including the choice of the model, we need data which played no part in this choice : for example a separate testing set, or an additional outer layer of cross-validation which repeats the choice of the best model within each training set.
 <!-- /solution -->
