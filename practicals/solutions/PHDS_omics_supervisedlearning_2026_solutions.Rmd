@@ -245,12 +245,13 @@ calculate_metrics <- function(true, predicted) {
 
 <!-- solution:code -->
 ```{r}
-calculate_metrics(y_vec, predicted = pred_train)
+metrics_train <- calculate_metrics(y_vec, predicted = pred_train)
+metrics_train
 ```
 <!-- /solution -->
 
 <!-- solution:text -->
-> **Answer:** The sRMSE is 0.08 and R2 is 0.997, indicating very high performance. 
+> **Answer:** The sRMSE is `r sprintf("%.3f", metrics_train$sRMSE)` and R2 is `r sprintf("%.3f", metrics_train$R2)`, indicating very high performance. 
 <!-- /solution -->
 
 > We could also interpret our predictions by visualising the true versus predicted values. The below helper function allows you to do this, with the arguments being the true values, predicted values, and a string to use as a descriptive title for the figure. 
@@ -290,16 +291,13 @@ plot_train
 
 > The predictions above are made on the data which was used to fit the model, so they say nothing about how the model would perform on new participants. The simplest way to evaluate the model on *unseen* data is a **train-test split**. Observations are randomly assigned to either the training set or the testing set. A model is trained on the training set, and used to predict on the unseen testing set. The predictions can then be compared to their true values to obtain an unbiased estimate of the model's performance.
 
-> Randomly select 70% of the participants as the training set (hint : the `sample()` function), and keep the remaining 30% as the testing set. Fit the same ridge regression model (`lambda = 1`) on the training set only, and predict the response of the testing set. Compute the same two metrics on the testing set, and plot the predictions. To make your results reproducible (and identical to mine), set the seed with `set.seed(123)` just before you sample the participants.
+> Randomly select 70% of the participants as the training set (hint : the `sample()` function), and keep the remaining 30% as the testing set. Fit the same ridge regression model (`lambda = 1`) on the training set only, and predict the response of the testing set. Compute the same two metrics on the testing set, and plot the predictions.
 
 > How do the results compare with those of 1a? What does this tell us?
 
 <!-- solution:code -->
 ```{r}
 n <- nrow(X_mat)
-
-# Set the seed, so that the random split is reproducible
-set.seed(123)
 
 # Randomly select 70% of the participants for training, and keep the others for testing
 train_idx <- sample(n, size = round(0.7 * n))
@@ -323,20 +321,17 @@ plot_test
 <!-- /solution -->
 
 <!-- solution:text -->
-> **Answer:** Now, the metrics are sRMSE = 0.707 and R2 = 0.501 (in this example, it will depend on your data split). While these indicate some reasonable level of predictive performance, they are not perfect, as before. This is more likely to be an accurate indication of the predictive signal in the data. 
+> **Answer:** Now, the metrics are sRMSE = `r sprintf("%.3f", metrics_test$sRMSE)` and R2 = `r sprintf("%.3f", metrics_test$R2)` (this will depend on your data split). While these indicate some reasonable level of predictive performance, they are not perfect, as before. This is more likely to be an accurate indication of the predictive signal in the data. 
 <!-- /solution -->
 
 # 2) K-fold cross-validation
 
 > The train-test split uses the data inefficiently : only 30% of the participants are predicted, and the result depends on the random split. **K-fold cross-validation** is a better alternative. Here, we first split the data into K distinct *folds* (partitions of the data). Cross-validation is a loop, where in each stage, a different fold is chosen to act as the testing set, and a model is trained on all the other folds. Therefore, K-fold cross-validation results in a series of K models, and in a prediction on unseen data for **every** participant. In this section, we are going to improve on our previous train-test split by implementing 10-fold CV. 
 
-> First, create the folds with the `createFolds()` function (use the arguments `k = 10` and `list = TRUE`, which gives a list containing the indices of the participants in each fold). Set the seed with `set.seed(123)` just before creating the folds.
+> First, create the folds with the `createFolds()` function (use the arguments `k = 10` and `list = TRUE`, which gives a list containing the indices of the participants in each fold).
 
 <!-- solution:code -->
 ```{r}
-# Set the seed, so that the random folds are reproducible
-set.seed(123)
-
 # Create the 10 folds : a list containing, for each fold, the indices of the participants in it
 folds <- createFolds(y_vec, k = 10, list = TRUE, returnTrain = FALSE)
 ```
@@ -373,7 +368,7 @@ plot_cv
 > Compute the same two metrics and plot the predictions. How do the results compare with those of 1b?
 
 <!-- solution:text -->
-> **Answer:** We have sRMSE = 0.694 and R2 = 0.520. These are in the same order of magnitude as the train test split, however using CV we use all of the data and reduce the impact of the random data split on the results. 
+> **Answer:** We have sRMSE = `r sprintf("%.3f", metrics_cv$sRMSE)` and R2 = `r sprintf("%.3f", metrics_cv$R2)`. These are in the same order of magnitude as the train test split, however using CV we use all of the data and reduce the impact of the random data split on the results. 
 <!-- /solution -->
 
 # 3) Tuning hyperparameters with `caret`
@@ -393,7 +388,7 @@ plot_cv
 >
 > The result of `train()` is a model which has been fitted on all the training data with the best hyperparameters. It can be used with `predict()` as before (with the testing predictors as the argument `newdata`), and the best hyperparameters are stored in its element `$bestTune`.
 
-> You are going to add 5-fold hyperparameter tuning in the ridge regression CV you implemented above. All this will require is to replace the call to `glmnet()` above with a call to `caret::train()`, using the arguments `method = "glmnet"`, `tuneGrid = ridge_grid`, and `trControl = trainControl(method = "cv", number = 5)`. As before, you may make predictions in the test set with the `predict()` function. Also, store the tuned values of the hyperparameter **lambda**, extracted from the `bestTune$lambda` of the `caret::train()` object. You may use the grid of hyperparameter options suggested below as inputs (its values are spread over several orders of magnitude, since lambda acts on a multiplicative scale). The inner cross-validation folds are chosen randomly by `caret`, so set the seed with `set.seed(123)` just before the `for` loop. 
+> You are going to add 5-fold hyperparameter tuning in the ridge regression CV you implemented above. All this will require is to replace the call to `glmnet()` above with a call to `caret::train()`, using the arguments `method = "glmnet"`, `tuneGrid = ridge_grid`, and `trControl = trainControl(method = "cv", number = 5)`. As before, you may make predictions in the test set with the `predict()` function. Also, store the tuned values of the hyperparameter **lambda**, extracted from the `bestTune$lambda` of the `caret::train()` object. You may use the grid of hyperparameter options suggested below as inputs (its values are spread over several orders of magnitude, since lambda acts on a multiplicative scale).
 
 ```{r}
 lambda_grid <- c(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 3, 4, 5, 10, 20, 50, 100)
@@ -407,9 +402,6 @@ ridge_grid = expand.grid(alpha = 0, lambda = lambda_grid)
 
 <!-- solution:code -->
 ```{r}
-# Set the seed, so that the random inner folds are reproducible
-set.seed(123)
-
 pred_ridge_tuned <- rep(NA_real_, n)
 best_lambda_ridge_tuned <- rep(NA_real_, length(folds))
 
@@ -444,12 +436,12 @@ plot_ridge_tuned
 <!-- /solution -->
 
 <!-- solution:text -->
-> **Answer:** The metrics are sRMSE = 0.718 and R2 = 0.512. These are effectively the same as the predictions using the fixed hyperparameter approach above, suggesting that the impact of the choice of hyperparameters may not be of great importance. The optimal hyerparameter value was fixed at 5 across iterations, suggesting a stable hyperparameter selection procedure. 
+> **Answer:** The metrics are sRMSE = `r sprintf("%.3f", metrics_ridge_tuned$sRMSE)` and R2 = `r sprintf("%.3f", metrics_ridge_tuned$R2)`. These are effectively the same as the predictions using the fixed hyperparameter approach above, suggesting that the impact of the choice of hyperparameters may not be of great importance. `r if (length(unique(best_lambda_ridge_tuned)) == 1) paste0("The optimal hyperparameter value was fixed at ", unique(best_lambda_ridge_tuned), " across iterations, suggesting a stable hyperparameter selection procedure.") else paste0("The optimal hyperparameter value varied between ", min(best_lambda_ridge_tuned), " and ", max(best_lambda_ridge_tuned), " across iterations, suggesting that its selection is sensitive to the training data.")` 
 <!-- /solution -->
 
 # 4) Other models
 
-> Now that you have a nested cross-validation framework with `caret`, it is easy to try other models : you only need to change the `method` and the `tuneGrid`. For each of the following models, repeat your code from the previous section (with the same outer folds), and choose the hyperparameter values to try yourselves. Compute the metrics, plot the predictions, and save the figure. To compare the models later, store the predictions and metrics of each model in objects with distinct names (e.g. `pred_lasso` and `metrics_lasso`). As before, set the seed with `set.seed(123)` just before each `for` loop.
+> Now that you have a nested cross-validation framework with `caret`, it is easy to try other models : you only need to change the `method` and the `tuneGrid`. For each of the following models, repeat your code from the previous section (with the same outer folds), and choose the hyperparameter values to try yourselves. Compute the metrics, plot the predictions, and save the figure. To compare the models later, store the predictions and metrics of each model in objects with distinct names (e.g. `pred_lasso` and `metrics_lasso`).
 
 > **How should you choose a hyperparameter grid?** There is no rule, and a grid is always somewhat arbitrary, but here is some practical advice. (1) Start with a small, coarse grid : every extra value multiplies the computation time (the number of models fitted is the number of rows of the grid, times 5 inner folds, times 10 outer folds). (2) For penalty parameters such as lambda, which act on a multiplicative scale, use values spread over several orders of magnitude (e.g. 0.001, 0.01, 0.1, 1, 10) rather than evenly spaced values. (3) After tuning, look at the selected values (the `$bestTune` of the `train()` object) : if a selected value is at the edge of your grid, the best value may lie beyond it, so extend the grid in that direction. Each model below comes with an example grid to start from.
 
@@ -459,9 +451,6 @@ plot_ridge_tuned
 
 <!-- solution:code -->
 ```{r}
-# Set the seed, so that the random inner folds are reproducible
-set.seed(123)
-
 pred_lasso <- rep(NA_real_, n)
 
 for (i in seq_along(folds)) {
@@ -495,9 +484,6 @@ plot_lasso
 
 <!-- solution:code -->
 ```{r}
-# Set the seed, so that the random inner folds are reproducible
-set.seed(123)
-
 pred_enet <- rep(NA_real_, n)
 
 # Both alpha and lambda are tuned : the grid contains all their combinations
@@ -534,9 +520,6 @@ plot_enet
 
 <!-- solution:code -->
 ```{r}
-# Set the seed, so that the random inner folds are reproducible
-set.seed(123)
-
 pred_pcr <- rep(NA_real_, n)
 
 # The numbers of components to try
@@ -573,9 +556,6 @@ plot_pcr
 
 <!-- solution:code -->
 ```{r}
-# Set the seed, so that the random inner folds are reproducible
-set.seed(123)
-
 pred_pls <- rep(NA_real_, n)
 
 for (i in seq_along(folds)) {
@@ -615,9 +595,6 @@ plot_pls
 
 <!-- solution:code -->
 ```{r}
-# Set the seed, so that the random inner folds are reproducible
-set.seed(123)
-
 pred_rf <- rep(NA_real_, n)
 
 rf_grid <- expand.grid(
@@ -680,7 +657,7 @@ model_metrics
 > In a few sentences summarise your conclusions on the predictive performance of these models. Did any model, or class of models, perform noticeably better than the rest?
 
 <!-- solution:text -->
-> **Answer:** The models generally produced comparable results. The best results were obtained with the PLS approach, producing sRMSE = 0.695 and R2 = 0.516. However, these gains were marginal, suggesting that the choice of predictive model is less important than the inherent signal present in the data. 
+> **Answer:** The models generally produced comparable results. The best results were obtained with the `r model_metrics$model[which.min(model_metrics$sRMSE)]` approach, producing sRMSE = `r sprintf("%.3f", model_metrics$sRMSE[which.min(model_metrics$sRMSE)])` and R2 = `r sprintf("%.3f", model_metrics$R2[which.min(model_metrics$sRMSE)])`. However, these gains were marginal, suggesting that the choice of predictive model is less important than the inherent signal present in the data. 
 <!-- /solution -->
 
 > Let's say we choose the *best model* by that which produced the best predictions in our cross-validation framework. Comment on how this strategy could introduce bias into our results.
