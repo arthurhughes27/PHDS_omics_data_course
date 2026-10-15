@@ -871,3 +871,79 @@ spls_final <- mixOmics::spls(X_mat, y_spls, keepX = spls_best_keepX, ncomp = spl
 <!-- /solution -->
 
 
+
+## 7c) sPLS in a cross-validation setup
+
+> In 7a, we tuned the hyperparameters of the sPLS model on the entire dataset. We cannot use this model to evaluate the predictive performance of sPLS : as we saw in section 3, the hyperparameters were chosen using all the participants, so the evaluation would be over-optimistic. To evaluate sPLS fairly, and to compare it with the other models, we need to implement a nested cross-validation, as we did for the other models. Since sPLS is not available in `caret`, you have to code the steps yourself with the `mixOmics` functions.
+
+> Use the same 10 outer folds as before (`folds`), and write a `for` loop over the folds. In each iteration :
+>
+> - Tune `ncomp` and `keepX` on the training participants only, with `mixOmics::tune.spls()` as in 7a (to save time, you may use `nrepeat = 1`), and extract the best values.
+> - Fit a sPLS model with these values on the training participants with `mixOmics::spls()`.
+> - Predict the response of the testing participants with the `predict()` function, giving the testing predictors as the argument `newdata`. The predictions are in the element `$predict` of the result, which is an array with three dimensions : participants, responses (here, just one) and components. Take the predictions for your response and for the number of components of the model.
+>
+> Store the predictions of all the participants in a vector, as before. Then compute the metrics, plot the predictions, and save the figure.
+
+<!-- solution:code -->
+```{r}
+pred_spls <- rep(NA_real_, n)
+
+for (i in seq_along(folds)) {
+  test_idx <- folds[[i]]
+  train_idx <- setdiff(seq_len(n), test_idx)
+  
+  # Tune ncomp and keepX on the training participants only
+  tuning_fold <- mixOmics::tune.spls(
+    X = X_mat[train_idx, ],
+    Y = y_spls[train_idx, , drop = FALSE],
+    ncomp = 3,
+    test.keepX = c(5, 10, 20, 50, 100),
+    validation = "Mfold",
+    folds = 5,
+    measure = "MSE",
+    mode = "regression",
+    nrepeat = 1
+  )
+  ncomp_fold <- tuning_fold$choice.ncomp[[1]]
+  keepX_fold <- tuning_fold$choice.keepX[seq_len(ncomp_fold)]
+  
+  # Fit the model with the best values on the training participants
+  fit_spls <- mixOmics::spls(
+    X_mat[train_idx, ],
+    y_spls[train_idx, , drop = FALSE],
+    keepX = keepX_fold,
+    ncomp = ncomp_fold
+  )
+  
+  # Predict the testing participants : the first response, with all the components of the model
+  pred_fold <- predict(fit_spls, newdata = X_mat[test_idx, ])
+  pred_spls[test_idx] <- pred_fold$predict[, 1, ncomp_fold]
+}
+
+metrics_spls <- calculate_metrics(true = y_vec, predicted = pred_spls)
+metrics_spls
+
+plot_spls <- plot_predictions(y_vec, pred_spls, "Sparse PLS regression : nested cross-validation")
+ggsave(here("output", "predictions_spls.pdf"), plot_spls, width = 8, height = 8)
+plot_spls
+```
+<!-- /solution -->
+
+> Finally, add the metrics of the sPLS model to the table of the metrics of the other models (`model_metrics`, from section 5), and save the new table in your `output` folder. How does the sPLS model compare with the other models?
+
+<!-- solution:code -->
+```{r}
+model_metrics_with_spls <- bind_rows(
+  model_metrics,
+  data.frame(model = "sPLS", sRMSE = metrics_spls$sRMSE, R2 = metrics_spls$R2)
+)
+
+write.csv(model_metrics_with_spls, here("output", "model_metrics_with_spls.csv"), row.names = FALSE)
+
+model_metrics_with_spls
+```
+<!-- /solution -->
+
+<!-- solution:text -->
+> **Answer:** The sPLS model has sRMSE = `r sprintf("%.3f", metrics_spls$sRMSE)` and R2 = `r sprintf("%.3f", metrics_spls$R2)`, compared with sRMSE = `r sprintf("%.3f", min(model_metrics$sRMSE))` for the best of the other models (`r model_metrics$model[which.min(model_metrics$sRMSE)]`). *[To write : comment on the performance of sPLS relative to the other models. The models are likely to perform similarly, so the choice may depend on other criteria, such as interpretability : sPLS selects a small number of genes, which is an advantage over PLS or PCR, which use all the genes.]*
+<!-- /solution -->
