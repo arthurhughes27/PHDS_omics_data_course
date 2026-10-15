@@ -182,8 +182,7 @@ sum(is.na(X_mat))
 ```
 <!-- /solution -->
 
-> For the rest of the tasks in this practical, you should use the standardised predictors and response as your inputs. 
-
+> For the rest of the tasks in this practical, you should use the standardised predictors and response as your inputs.
 
 # 1) Building a predictive model
 
@@ -251,7 +250,7 @@ calculate_metrics(y_vec, predicted = pred_train)
 <!-- /solution -->
 
 <!-- solution:text -->
-> **Answer:** The sRMSE is 0.013 and R2 is 0.999, indicating very high performance. 
+> **Answer:** The sRMSE is 0.08 and R2 is 0.997, indicating very high performance. 
 <!-- /solution -->
 
 > We could also interpret our predictions by visualising the true versus predicted values. The below helper function allows you to do this, with the arguments being the true values, predicted values, and a string to use as a descriptive title for the figure. 
@@ -321,7 +320,7 @@ plot_test
 <!-- /solution -->
 
 <!-- solution:text -->
-> **Answer:** Now, the metrics are sRMSE = 0.786 and R2 = 0.494 (in this example, it will depend on your data split). While these indicate some reasonable level of predictive performance, they are not perfect, as before. This is more likely to be an accurate indication of the predictive signal in the data. 
+> **Answer:** Now, the metrics are sRMSE = 0.707 and R2 = 0.501 (in this example, it will depend on your data split). While these indicate some reasonable level of predictive performance, they are not perfect, as before. This is more likely to be an accurate indication of the predictive signal in the data. 
 <!-- /solution -->
 
 # 2) K-fold cross-validation
@@ -368,7 +367,7 @@ plot_cv
 > Compute the same two metrics and plot the predictions. How do the results compare with those of 1b?
 
 <!-- solution:text -->
-> **Answer:** We have sRMSE = 0.778 and R2 = 0.406. These are in the same order of magnitude as the train test split, however using CV we use all of the data and reduce the impact of the random data split on the results. 
+> **Answer:** We have sRMSE = 0.694 and R2 = 0.520. These are in the same order of magnitude as the train test split, however using CV we use all of the data and reduce the impact of the random data split on the results. 
 <!-- /solution -->
 
 # 3) Tuning hyperparameters with `caret`
@@ -436,7 +435,7 @@ plot_ridge_tuned
 <!-- /solution -->
 
 <!-- solution:text -->
-> **Answer:** The metrics are sRMSE = 0.772 and R2 = 0.42. These are slightly better than the predictions using the fixed hyperparameter approach above. However, these gains are minimal, suggesting that the impact of the choice of hyperparameters may not be of great importance. The optimal hyerparameter value was fixed at 5 across iterations, suggesting a stable hyperparameter selection procedure. 
+> **Answer:** The metrics are sRMSE = 0.718 and R2 = 0.512. These are effectively the same as the predictions using the fixed hyperparameter approach above, suggesting that the impact of the choice of hyperparameters may not be of great importance. The optimal hyerparameter value was fixed at 5 across iterations, suggesting a stable hyperparameter selection procedure. 
 <!-- /solution -->
 
 # 4) Other models
@@ -652,10 +651,12 @@ model_metrics
 
 > In a few sentences summarise your conclusions on the predictive performance of these models. Did any model, or class of models, perform noticeably better than the rest?
 
+<!-- solution:text -->
+> **Answer:** The models generally produced comparable results. The best results were obtained with the PLS approach, producing sRMSE = 0.695 and R2 = 0.516. However, these gains were marginal, suggesting that the choice of predictive model is less important than the inherent signal present in the data. 
+<!-- /solution -->
+
 > Let's say we choose the *best model* by that which produced the best predictions in our cross-validation framework. Comment on how this strategy could introduce bias into our results.
 
 <!-- solution:text -->
-> **Answer:** *[To write : summary of the predictive performance of the models, and whether any model or class of models performed better than the rest.]*
-
-> **Answer:** *[To write : bias introduced by choosing the best model on its cross-validation performance.]*
+> **Answer:** 
 <!-- /solution -->
