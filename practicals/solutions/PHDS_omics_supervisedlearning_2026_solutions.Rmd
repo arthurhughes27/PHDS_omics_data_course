@@ -10,7 +10,7 @@ editor_options:
 > To save us some time, I have preprocessed the data for you. The data is an extract of open-access data from the Human Immune Project Consortium, with [detail of the study found here](https://immunespace.org/query/study/SDY1119#study-citations). The relevant information for this exercise is as follows :
 >
 > - Antibodies were measured at days 0 and 28
-> - Gene expression of around 10,000 genes was measured at days 0 and 7
+> - Gene expression of around 10,000 genes was measured at days 0 and 7. To reduce the computation time, I kept only the 1,000 most variable genes
 
 > Flu is an interesting virus in this context, since it is a common disease, and many people may have already been infected with a given flu strain prior to vaccination. There is evidence in the literature that prior infection can modify the response to vaccination. Therefore, to take into account baseline (day 0) information, I have transformed both the response and the predictors into (log2) fold-change values. That is, the *ratio* between the post-vaccination and pre-vaccination measurements.
 
@@ -60,7 +60,7 @@ omics_practicals/
 
 ### Add the files
 
-> 1. Copy the data file I sent you, `SDY1119_day7_GE_foldChange.RData`, into the `data-raw` folder.
+> 1. Copy the data file I sent you, `SDY1119_day7_GE_foldChange_top1000.RData`, into the `data-raw` folder.
 > 2. Copy this practical (the `.Rmd` file) into the `analysis` folder.
 > 3. In the `Files` pane of RStudio, open the `analysis` folder and click on the `.Rmd` file to open it.
 
@@ -124,7 +124,7 @@ set.seed(123)
 here()
 
 # Check that the data file exists
-file.exists(here("data-raw", "SDY1119_day7_GE_foldChange.RData"))
+file.exists(here("data-raw", "SDY1119_day7_GE_foldChange_top1000.RData"))
 ```
 
 > If the result is `FALSE`, or if the path printed above is not your project folder, go back to the previous steps : check that the file is in `data-raw`, and that you opened the project and then this `.Rmd` file from the `Files` pane.
@@ -134,7 +134,7 @@ file.exists(here("data-raw", "SDY1119_day7_GE_foldChange.RData"))
 > Load the data into the global environment, using `here()` to build the path to the file. The function `load()` reads the object saved in the file, and `get()` retrieves it.
 
 ```{r}
-df_all <- get(load(here("data-raw", "SDY1119_day7_GE_foldChange.RData")))
+df_all <- get(load(here("data-raw", "SDY1119_day7_GE_foldChange_top1000.RData")))
 ```
 
 > We can explore the data first to see what we're dealing with. Let's print the first few columns and rows.
@@ -160,16 +160,17 @@ response_hist
 
 ## 0e) Standardise the data
 
-> Many models are sensitive to the scale of the variables. Standardise the response and every gene, so that each has mean 0 and standard deviation 1, using the `scale()` function. Store the response as a numeric vector called `y_vec`, and the genes as a numeric matrix called `X_mat` (columns are genes and rows are participants). Before proceeding, check explicitly that the column means are 0 and the standard deviations are 1 across your dataset. 
+> Many models are sensitive to the scale of the variables. Standardise the response and every gene, so that each has mean 0 and standard deviation 1, using the `scale()` function. Store the response as a numeric vector called `y_vec`, and the genes as a numeric matrix called `X_mat` (columns are genes and rows are participants; the genes are all the columns after `response`). Before proceeding, check explicitly that the column means are 0 and the standard deviations are 1 across your dataset. 
 
 <!-- solution:code -->
 ```{r}
 # The response, as a numeric vector
 y_vec <- as.numeric(scale(df_all$response))
 
-# The genes (from a1cf to zzz3), as a numeric matrix
-X_mat <- df_all %>%
-  dplyr::select(a1cf:zzz3) %>%
+# The genes (all the columns after the response), as a numeric matrix
+gene_cols <- (which(colnames(df_all) == "response") + 1):ncol(df_all)
+
+X_mat <- df_all[, gene_cols] %>%
   as.matrix() %>%
   scale()
 
@@ -431,8 +432,6 @@ metrics_ridge_tuned
 plot_ridge_tuned <- plot_predictions(y_vec, pred_ridge_tuned, "Ridge regression : nested cross-validation")
 ggsave(here("output", "predictions_ridge_tuned.pdf"), plot_ridge_tuned, width = 8, height = 8)
 plot_ridge_tuned
-
-best_lambda_ridge_tuned
 ```
 <!-- /solution -->
 
@@ -468,10 +467,7 @@ for (i in seq_along(folds)) {
   pred_lasso[test_idx] <- predict(fit_lasso, newdata = X_mat[test_idx, ])
 }
 
-metrics_lasso <- data.frame(
-  sRMSE = sqrt(mean((y_vec - pred_lasso) ^ 2)),
-  r2 = cor(y_vec, pred_lasso, method = "pearson") ^ 2
-)
+metrics_lasso <- calculate_metrics(true = y_vec, predicted = pred_lasso)
 metrics_lasso
 
 plot_lasso <- plot_predictions(y_vec, pred_lasso, "Lasso regression : nested cross-validation")
@@ -507,10 +503,7 @@ for (i in seq_along(folds)) {
   pred_enet[test_idx] <- predict(fit_enet, newdata = X_mat[test_idx, ])
 }
 
-metrics_enet <- data.frame(
-  sRMSE = sqrt(mean((y_vec - pred_enet) ^ 2)),
-  r2 = cor(y_vec, pred_enet, method = "pearson") ^ 2
-)
+metrics_enet <- calculate_metrics(true = y_vec, predicted = pred_enet)
 metrics_enet
 
 plot_enet <- plot_predictions(y_vec, pred_enet, "Elastic net regression : nested cross-validation")
@@ -528,7 +521,7 @@ plot_enet
 pred_pcr <- rep(NA_real_, n)
 
 # The numbers of components to try
-ncomp_grid <- data.frame(ncomp = c(1:10, seq(15, 50, 5)))
+ncomp_grid <- data.frame(ncomp = c(1, 2, 5, 10, 20))
 
 for (i in seq_along(folds)) {
   test_idx <- folds[[i]]
@@ -546,10 +539,7 @@ for (i in seq_along(folds)) {
   pred_pcr[test_idx] <- predict(fit_pcr, newdata = X_mat[test_idx, ])
 }
 
-metrics_pcr <- data.frame(
-  sRMSE = sqrt(mean((y_vec - pred_pcr) ^ 2)),
-  r2 = cor(y_vec, pred_pcr, method = "pearson") ^ 2
-)
+metrics_pcr <- calculate_metrics(true = y_vec, predicted = pred_pcr)
 metrics_pcr
 
 plot_pcr <- plot_predictions(y_vec, pred_pcr, "Principal component regression : nested cross-validation")
@@ -582,10 +572,7 @@ for (i in seq_along(folds)) {
   pred_pls[test_idx] <- predict(fit_pls, newdata = X_mat[test_idx, ])
 }
 
-metrics_pls <- data.frame(
-  sRMSE = sqrt(mean((y_vec - pred_pls) ^ 2)),
-  r2 = cor(y_vec, pred_pls, method = "pearson") ^ 2
-)
+metrics_pls <- calculate_metrics(true = y_vec, predicted = pred_pls)
 metrics_pls
 
 plot_pls <- plot_predictions(y_vec, pred_pls, "Partial least squares regression : nested cross-validation")
@@ -607,7 +594,7 @@ plot_pls
 pred_rf <- rep(NA_real_, n)
 
 rf_grid <- expand.grid(
-  mtry = c(100, 1000),
+  mtry = c(100, 300),
   splitrule = "variance",
   min.node.size = c(5, 10)
 )
@@ -628,10 +615,7 @@ for (i in seq_along(folds)) {
   pred_rf[test_idx] <- predict(fit_rf, newdata = X_mat[test_idx, ])
 }
 
-metrics_rf <- data.frame(
-  sRMSE = sqrt(mean((y_vec - pred_rf) ^ 2)),
-  r2 = cor(y_vec, pred_rf, method = "pearson") ^ 2
-)
+metrics_rf <- calculate_metrics(true = y_vec, predicted = pred_rf)
 metrics_rf
 
 plot_rf <- plot_predictions(y_vec, pred_rf, "Random forest : nested cross-validation")
@@ -650,7 +634,7 @@ plot_rf
 ```{r}
 model_metrics <- bind_rows(
   list(
-    "Ridge" = metrics_ridge,
+    "Ridge" = metrics_ridge_tuned,
     "Lasso" = metrics_lasso,
     "Elastic net" = metrics_enet,
     "PCR" = metrics_pcr,
