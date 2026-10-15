@@ -663,7 +663,7 @@ model_metrics
 > Let's say we choose the *best model* by that which produced the best predictions in our cross-validation framework. Comment on how this strategy could introduce bias into our results.
 
 <!-- solution:text -->
-> **Answer:** Choosing the model with the best cross-validated performance, and then reporting that performance as our estimate of how well it would predict new participants, is over-optimistic. The cross-validated metrics are noisy estimates, which depend on the particular participants and on the random folds. The best of several noisy estimates is, on average, better than its true performance : the model that comes out on top is partly the model that was lucky on these data. The more models (and hyperparameter values) we compare, the larger this bias. It is the same problem as tuning the hyperparameters and evaluating the model on the same data, as in section 3, but now at the level of the choice of the model : the data which are used to select the model are also used to evaluate it. In our case, the models have very similar performances, so the apparent advantage of the best model could easily be due to chance. To obtain an unbiased estimate of the performance of the whole procedure, including the choice of the model, we need data which played no part in this choice : for example a separate testing set, or an additional outer layer of cross-validation which repeats the choice of the best model within each training set.
+> **Answer:** Choosing the model with the best cross-validated performance, and then reporting that performance as our estimate of how well it would predict new participants, is over-optimistic. In our case, the models have very similar performances, so the apparent advantage of the best model could easily be due to chance. To obtain an unbiased estimate of the performance of the whole procedure, including the choice of the model, we need data which played no part in this choice, e.g. a separate testing set.
 <!-- /solution -->
 
 # 6) Interpreting the selected variables (optional)
@@ -727,12 +727,10 @@ plot_lasso_coefs
 <!-- /solution -->
 
 <!-- solution:text -->
-> **Answer:** *[To write : meaning of the sign of the coefficient. A positive coefficient means that a higher day-7 fold-change in the expression of the gene is associated with a higher antibody response, all the other genes being equal, and a negative coefficient means the opposite.]*
+> **Answer:**  A positive coefficient means that a higher day-7 fold-change in the expression of the gene is associated with a higher antibody response, all the other genes being equal, and a negative coefficient means the opposite.
 <!-- /solution -->
 
 > Can you think of a way to interpret the names of the selected genes, to see whether particular biological processes are over-represented? 
-
-> Hint : you could paste the gene names, separated by commas, into a software which finds the biological functions they represent (for example the DAVID bioinformatics or Enrichr websites; even generative AI tools can give a quick idea). The `paste()` function with the argument `collapse = ", "` creates this string.
 
 <!-- solution:code -->
 ```{r}
@@ -740,13 +738,9 @@ paste(lasso_coefs$gene, collapse = ", ")
 ```
 <!-- /solution -->
 
-<!-- solution:text -->
-> **Answer:** *[To write : the biological processes which seem to be over-represented among the selected genes.]*
-<!-- /solution -->
-
 ## 6b) Variables selected in cross-validation
 
-> There is a limitation to the interpretation above : the selected genes depend on the particular data used to fit the model. If we had a slightly different sample of participants, would the same genes be selected? Furthermore, when genes are correlated with each other, the lasso tends to select one of them somewhat arbitrarily.
+> There is a limitation to the interpretation above : the selected genes depend on the particular data used to fit the model. If we had a slightly different sample of participants, would the same genes be selected? 
 
 > Cross-validation gives us a way to assess this. In each iteration of the cross-validation, a model is fit on a different part of the data, and may select different genes. With L1-regularisation methods like lasso and elastic net, we can therefore interpret the *proportion of folds in which each gene is selected*. These approaches can broadly be called *stability selection* methods, as genes which are more frequently selected are more *stable* predictors.
 
@@ -788,22 +782,6 @@ head(selection_df, 10)
 ```
 <!-- /solution -->
 
-> How many genes were selected at least once? How many were selected in all of the folds? 
-
-<!-- solution:code -->
-```{r}
-c(
-  "at least once" = nrow(selection_df),
-  "in at least half of the folds" = sum(selection_df$prop >= 0.5),
-  "in all the folds" = sum(selection_df$prop == 1)
-)
-```
-<!-- /solution -->
-
-<!-- solution:text -->
-> **Answer:** `r nrow(selection_df)` genes were selected at least once, `r sum(selection_df$prop >= 0.5)` in at least half of the folds, and `r sum(selection_df$prop == 1)` in all the folds. *[To write : comment on how stable the selection is.]*
-<!-- /solution -->
-
 > Make a plot showing the proportion of selection on one axis and the gene names on the other axis, sorted from the most to the least frequently selected, for the genes selected in at least half of the folds. Save the figure.
 
 <!-- solution:code -->
@@ -820,25 +798,6 @@ ggsave(here("output", "lasso_selection_frequency.pdf"), plot_selection, width = 
 
 plot_selection
 ```
-<!-- /solution -->
-
-> Finally, compare the two interpretations. Which of the genes selected by the model fit on the entire dataset (6a) are also frequently selected in cross-validation (e.g. in at least 80% of the folds)? How could you derive a *stable* predictive gene signature?
-
-<!-- solution:code -->
-```{r}
-# Genes selected by the model fit on the entire dataset, and in at least 80% of the folds
-stable_genes <- selection_df$gene[selection_df$prop >= 0.8]
-
-c(
-  "selected on the entire dataset" = nrow(lasso_coefs),
-  "selected in at least 80% of the folds" = length(stable_genes),
-  "both" = length(intersect(lasso_coefs$gene, stable_genes))
-)
-```
-<!-- /solution -->
-
-<!-- solution:text -->
-> **Answer:** `r length(intersect(lasso_coefs$gene, selection_df$gene[selection_df$prop >= 0.8]))` of the `r nrow(lasso_coefs)` genes selected on the entire dataset were selected in at least 80% of the folds. *[To write : how to derive a stable signature. For example, keep only the genes which are selected in a large proportion of the folds (e.g. at least 80%), since these do not depend on the particular sample of participants, rather than all the genes selected by the model fit on the entire dataset.]*
 <!-- /solution -->
 
 # 7) Sparse partial least squares with `mixOmics` (optional)
@@ -898,48 +857,17 @@ spls_best_keepX
 <!-- /solution -->
 
 <!-- solution:text -->
-> **Answer:** The best number of components is `r spls_best_ncomp`, keeping `r paste(spls_best_keepX, collapse = ", ")` gene(s) for the component(s). *[To write : comment on the tuning plot, and whether the selected values lie at the edge of the grid.]*
+> **Answer:** The best number of components is `r spls_best_ncomp`, keeping `r paste(spls_best_keepX, collapse = ", ")` gene(s) for the component(s).
 <!-- /solution -->
 
 ## 7b) Fitting the final sPLS model
 
-> Now, with your best values of `ncomp` and `keepX`, fit a final model to the entire dataset with `mixOmics::spls()`. Extract the names of the genes with non-zero loading weights on the first component with `mixOmics::selectVar()` (argument `comp = 1`; the names are in the element `$X$name` of the result). Plot the loading weights of these genes with `mixOmics::plotLoadings()` (with the arguments `method = "mean"` and `contrib = "max"`), and save the plot. [The following guide may help](https://mixomics.org/methods/spls/).
+> Now, with your best values of `ncomp` and `keepX`, fit a final model to the entire dataset with `mixOmics::spls()`. Extract the names of the genes with non-zero loading weights on the first component with `mixOmics::selectVar()` (argument `comp = 1`; the names are in the element `$X$name` of the result).
 
 <!-- solution:code -->
 ```{r}
 spls_final <- mixOmics::spls(X_mat, y_spls, keepX = spls_best_keepX, ncomp = spls_best_ncomp)
-
-# The genes with non-zero loading weights on the first component
-spls_gene_signature <- mixOmics::selectVar(spls_final, comp = 1)$X$name
-spls_gene_signature
-
-# Plot the loading weights of these genes, and save the plot as a PDF
-mixOmics::plotLoadings(spls_final, method = "mean", contrib = "max")
-
-pdf(here("output", "spls_loadings.pdf"), width = 8, height = 8)
-mixOmics::plotLoadings(spls_final, method = "mean", contrib = "max")
-invisible(dev.off())
 ```
 <!-- /solution -->
 
-> How many genes are selected on the first component? How many of them were also selected by the lasso model fit on the entire dataset (question 6a)? How can we interpret these genes?
 
-<!-- solution:code -->
-```{r}
-c(
-  "selected by sPLS (component 1)" = length(spls_gene_signature),
-  "selected by lasso (6a)" = nrow(lasso_coefs),
-  "both" = length(intersect(spls_gene_signature, lasso_coefs$gene))
-)
-```
-<!-- /solution -->
-
-<!-- solution:text -->
-> **Answer:** `r length(spls_gene_signature)` genes are selected on the first component, of which `r length(intersect(spls_gene_signature, lasso_coefs$gene))` were also selected by the lasso. *[To write : interpretation of the genes. The sign of a loading weight shows the direction of the contribution of the gene to the component, and the component is the combination of genes which covaries the most with the antibody response.]*
-<!-- /solution -->
-
-> The hyperparameters were tuned on the entire dataset, as were the final model and its selected genes. What would you do to assess the stability of the sPLS gene signature, as we did for the lasso in question 6b?
-
-<!-- solution:text -->
-> **Answer:** *[To write : repeat the tuning and the selection of the genes within each training set of a cross-validation, and compute the proportion of folds in which each gene is selected, as for the lasso.]*
-<!-- /solution -->
