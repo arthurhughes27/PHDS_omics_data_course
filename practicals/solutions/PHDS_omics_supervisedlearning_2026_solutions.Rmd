@@ -160,9 +160,7 @@ response_hist
 
 ## 0e) Standardise the data
 
-> Many models are sensitive to the scale of the variables. Standardise the response and every gene, so that each has mean 0 and standard deviation 1, using the `scale()` function. Store the response as a numeric vector called `y_vec`, and the genes as a numeric matrix called `X_mat` (columns are genes and rows are participants). Check that the means and standard deviations are what you expect, and that no values are missing.
-
-> Note : strictly speaking, standardisation should be learned from the training data only, and then applied to the testing data (otherwise, information on the testing data "leaks" into the training). We ignore this here for simplicity.
+> Many models are sensitive to the scale of the variables. Standardise the response and every gene, so that each has mean 0 and standard deviation 1, using the `scale()` function. Store the response as a numeric vector called `y_vec`, and the genes as a numeric matrix called `X_mat` (columns are genes and rows are participants). Before proceeding, check explicitly that the column means are 0 and the standard deviations are 1 across your dataset. 
 
 <!-- solution:code -->
 ```{r}
@@ -183,15 +181,37 @@ sum(is.na(X_mat))
 ```
 <!-- /solution -->
 
-# 1) Why do we need unseen data?
+> For the rest of the tasks in this practical, you should use the standardised predictors and response as your inputs. 
 
-## 1a) Performance on the training data
 
-> We are going to start with ridge regression, a regularised linear regression with a penalty term controlling the size of the coefficients. It is implemented in the `glmnet()` function of the `glmnet` package, with the argument `alpha = 0`. The strength of the penalty is controlled by the argument `lambda`. For now, we will fix `lambda = 1`. The `glmnet()` function takes the predictors as a matrix `x` and the response as a vector `y`, and predictions can be made with the `predict()` function, giving the new predictors as the argument `newx`.
+# 1) Building a predictive model
 
-> Fit a ridge regression with `lambda = 1` to **all** the participants and all the genes. Then use the model to predict the response of these *same* participants.
+> In this section, we are going to demonstrate how to fit a predictive model to a dataset and use it to make predictions. We will demonstrate how fitting a model to a dataset, and making predictions on the same samples used to fit the model, results in over-optimistic evaluation of the prediction error. 
 
-> We want to evaluate the quality of these predictions with two metrics. The first is the root-mean-squared-error (RMSE) between the true values $y_i$ and the predictions $\hat{y}_i$ :
+## 1a) Fitting a ridge regression model
+
+> As a first example, we are going to fit a *ridge regression* model to the entire dataset. Ridge is a regularised linear regression with a penalty term controlling the size of the coefficients. It is implemented in the `glmnet()` function of the `glmnet` package, with the argument `alpha = 0`. The strength of the penalty is controlled by the argument `lambda`. For now, we will fix `lambda = 1`. The `glmnet()` function takes the predictors as a matrix `x` and the response as a vector `y`, and predictions can be made with the `predict()` function, giving the predictors as the argument `newx`.
+
+> Fit a ridge regression with `lambda = 1` to all of the observations.
+
+<!-- solution:code -->
+```{r}
+# Fit the ridge regression to all the participants
+fit_all <- glmnet(x = X_mat, y = y_vec, alpha = 0, lambda = 1)
+```
+<!-- /solution -->
+
+
+> Now use the `predict()` function to make predictions of the response, using the same data (`X_mat`) as an input to the `newx` argument. 
+
+<!-- solution:code -->
+```{r}
+# Predict the response of the same participants
+pred_train <- as.numeric(predict(fit_all, newx = X_mat))
+```
+<!-- /solution -->
+
+> Now we've made these predictions, we can evaluate them with **performance metrics**. For the purposes of this exercise, we will be using two metrics. The first is the root-mean-squared-error (RMSE) between the true values $y_i$ and the predictions $\hat{y}_i$ :
 
 $$
 \text{RMSE} = \sqrt{\frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2}
@@ -207,10 +227,36 @@ $$
 
 > The higher this is, the better. It can be interpreted as "the proportion of variability in the true response which is explained by the predictions".
 
-> Compute these two metrics for your predictions. Then plot the predicted values against the true values. I give you the following function to do this plot : it also shows the "identity line" through the diagonal, which is where perfect predictions lie (i.e. predicted value = true value).
+> Below is a helper function which you can use to compute these metrics, by inputting your true and predicted response values. 
 
 ```{r}
-plot_predictions <- function(true, predicted, title) {
+calculate_metrics <- function(true, predicted) {
+  sRMSE = sqrt(mean((true - predicted) ^ 2))/sd(true)
+  R2 = cor(true, predicted, method = "pearson") ^ 2
+  
+  metrics = list("sRMSE" = sRMSE, "R2" = R2)
+  
+  return(metrics)
+}
+```
+
+
+> Compute and report the two metrics for your first ridge regression fit on the entire dataset. 
+
+<!-- solution:code -->
+```{r}
+calculate_metrics(y_vec, predicted = pred_train)
+```
+<!-- /solution -->
+
+<!-- solution:text -->
+> **Answer:** The sRMSE is 0.013 and R2 is 0.999, indicating very high performance. 
+<!-- /solution -->
+
+> We could also interpret our predictions by visualising the true versus predicted values. The below helper function allows you to do this, with the arguments being the true values, predicted values, and a string to use as a descriptive title for the figure. 
+
+```{r}
+plot_predictions <- function(true, predicted, title = "Insert a descriptive plot title here") {
   # The same limits for both axes : the range of the true and predicted values, with some padding
   results_range <- range(c(true, predicted))
   padding <- diff(results_range) * 0.02
@@ -225,23 +271,10 @@ plot_predictions <- function(true, predicted, title) {
 }
 ```
 
-> Save your figure as a PDF in the `output` folder using `ggsave()`, with `here()` to build the path. Do the same for all the figures in this practical. What do you conclude about the quality of the predictions?
+> Plot your results using the above helper function, and save the resulting image with a descriptive title, using the `ggsave()`, with `here()` to build the path (you should do this for all the figures in the practical). What do you conclude about the quality of the predictions? 
 
 <!-- solution:code -->
 ```{r}
-# Fit the ridge regression to all the participants
-fit_all <- glmnet(x = X_mat, y = y_vec, alpha = 0, lambda = 1)
-
-# Predict the response of the same participants
-pred_train <- as.numeric(predict(fit_all, newx = X_mat))
-
-# Evaluation metrics
-metrics_train <- data.frame(
-  rmse = sqrt(mean((y_vec - pred_train) ^ 2)),
-  r2 = cor(y_vec, pred_train, method = "pearson") ^ 2
-)
-metrics_train
-
 # Plot and save the figure
 plot_train <- plot_predictions(y_vec, pred_train, "Ridge regression : predictions on the training data")
 ggsave(here("output", "predictions_ridge_train.pdf"), plot_train, width = 8, height = 8)
@@ -250,7 +283,7 @@ plot_train
 <!-- /solution -->
 
 <!-- solution:text -->
-> **Answer:** *[To write : what the metrics and the plot of the predictions on the training data show.]*
+> **Answer:** The predictions are effectively perfect. This is an indication of overfitting: the model exploits the complexity of the data to build a perfect relationship between the predictors and the response. However, these relationships must be tested on new data to be truly evaluated, as this is likely over-optimistic. 
 <!-- /solution -->
 
 ## 1b) A training set and a testing set
@@ -276,10 +309,7 @@ fit_split <- glmnet(x = X_mat[train_idx, ], y = y_vec[train_idx], alpha = 0, lam
 pred_test <- as.numeric(predict(fit_split, newx = X_mat[test_idx, ]))
 
 # Evaluation metrics, on the testing set
-metrics_test <- data.frame(
-  rmse = sqrt(mean((y_vec[test_idx] - pred_test) ^ 2)),
-  r2 = cor(y_vec[test_idx], pred_test, method = "pearson") ^ 2
-)
+metrics_test = calculate_metrics(true = y_vec[test_idx], predicted = pred_test)
 metrics_test
 
 # Plot and save the figure
@@ -290,22 +320,26 @@ plot_test
 <!-- /solution -->
 
 <!-- solution:text -->
-> **Answer:** *[To write : comparison of the performance on the training and testing data, and what the gap tells us about overfitting.]*
+> **Answer:** Now, the metrics are sRMSE = 0.786 and R2 = 0.494 (in this example, it will depend on your data split). While these indicate some reasonable level of predictive performance, they are not perfect, as before. This is more likely to be an accurate indication of the predictive signal in the data. 
 <!-- /solution -->
 
 # 2) K-fold cross-validation
 
-> The train-test split uses the data inefficiently : only 30% of the participants are predicted, and the result depends on the random split. **K-fold cross-validation** is a better alternative. Here, we first split the data into K distinct *folds* (partitions of the data). Cross-validation is a loop, where in each stage, a different fold is chosen to act as the testing set, and a model is trained on all the other folds. Therefore, K-fold cross-validation results in a series of K models, and in a prediction on unseen data for **every** participant.
+> The train-test split uses the data inefficiently : only 30% of the participants are predicted, and the result depends on the random split. **K-fold cross-validation** is a better alternative. Here, we first split the data into K distinct *folds* (partitions of the data). Cross-validation is a loop, where in each stage, a different fold is chosen to act as the testing set, and a model is trained on all the other folds. Therefore, K-fold cross-validation results in a series of K models, and in a prediction on unseen data for **every** participant. In this section, we are going to improve on our previous train-test split by implementing 10-fold CV. 
 
-> Implement 10-fold cross-validation for the ridge regression with `lambda = 1`. Create the folds with the `createFolds()` function (use the arguments `k = 10` and `list = TRUE`, which gives a list containing the indices of the participants in each fold). Then write a `for` loop over the folds. In each iteration, fit the model on the participants who are not in the fold, and predict the participants in the fold. Store the predictions in a vector of length `n` (hint : create it before the loop with `rep(NA_real_, n)`, and fill it in at the positions of the testing participants).
-
-> When the loop has finished, compute the same two metrics and plot the predictions. How do the results compare with those of 1b?
+> First, create the folds with the `createFolds()` function (use the arguments `k = 10` and `list = TRUE`, which gives a list containing the indices of the participants in each fold). 
 
 <!-- solution:code -->
 ```{r}
 # Create the 10 folds : a list containing, for each fold, the indices of the participants in it
 folds <- createFolds(y_vec, k = 10, list = TRUE, returnTrain = FALSE)
+```
+<!-- /solution -->
 
+> Now, you will write a basic implementation of K-fold CV using a `for` loop over the 10 folds. In the `i`th iteration of the loop, form the training data by removing the observations belonging to the `i`th fold from the data. Then, fit a ridge regression model to this training data and use it to make predictions, as we did in question 1. Hint: you will need to store the predictions after every iteration. This can be done by creating an empty vector with `rep(NA_real_, n)` prior to initiating the `for` loop, and filling it with the predictions using the indices of the test participants within every iteration. 
+
+<!-- solution:code -->
+```{r}
 # Vector which will contain the prediction of each participant
 pred_cv <- rep(NA_real_, n)
 
@@ -320,10 +354,7 @@ for (i in seq_along(folds)) {
 }
 
 # Evaluation metrics, on the predictions of all the participants
-metrics_cv <- data.frame(
-  rmse = sqrt(mean((y_vec - pred_cv) ^ 2)),
-  r2 = cor(y_vec, pred_cv, method = "pearson") ^ 2
-)
+metrics_cv <- calculate_metrics(true = y_vec, predicted = pred_cv)
 metrics_cv
 
 # Plot and save the figure
@@ -333,15 +364,17 @@ plot_cv
 ```
 <!-- /solution -->
 
+> Compute the same two metrics and plot the predictions. How do the results compare with those of 1b?
+
 <!-- solution:text -->
-> **Answer:** *[To write : comparison with the single train-test split. Cross-validation uses all the participants, and gives a more stable estimate. The value lambda = 1 was fixed in advance, however, without any reason to prefer it.]*
+> **Answer:** We have sRMSE = 0.778 and R2 = 0.406. These are in the same order of magnitude as the train test split, however using CV we use all of the data and reduce the impact of the random data split on the results. 
 <!-- /solution -->
 
 # 3) Tuning hyperparameters with `caret`
 
-> Some models have *hyperparameters* to specify, which are parameters which control certain aspects of the learning process. Ridge regression, for example, has the hyperparameter lambda, which controls the strength of the penalisation term. Since we are unlikely to have much reason to prefer any particular values of these hyperparameters, we may prefer to let the data decide for us which are the *best* values. We can also do this with cross-validation : we try different values of the hyperparameters, and we keep those which give the best predictions (here, the lowest RMSE).
+> Some models have *hyperparameters* to specify, which are parameters which control certain aspects of the learning process. Ridge regression, for example, has the hyperparameter **lambda**, which controls the strength of the penalisation term. Since we are unlikely to have much reason to prefer any particular values of these hyperparameters, we may prefer to let the data decide for us which are the *best* values. We can also do this with cross-validation : we try different values of the hyperparameters, and we keep those which give the best predictions (here, the lowest RMSE).
 
-> However, we must be careful. If we choose the hyperparameters using the same predictions that we use to evaluate the model, the performance will be over-optimistic : we have chosen the values which happen to work best on these participants. Typically, we do something called *nested cross-validation* in order to first build a model with optimal hyperparameters, and then use that model to predict on unseen data. A nested cross-validation has two loops. The first, called the *outer loop*, separates the training data from the testing data, as in the cross-validation above. The second, called the *inner loop*, uses cross-validation on the training data only to select the best values of the model hyperparameters. The testing data is never used to choose the hyperparameters.
+> However, we must be careful. If we choose the hyperparameters using the same predictions that we use to evaluate the model, the performance will be over-optimistic (the same problem we evoked in question 1). Instead, we typically do something called *nested cross-validation* in order to first build a model with optimal hyperparameters, and then use that model to predict on unseen data. A nested cross-validation has two loops. The first, called the *outer loop*, separates the training data from the testing data (which is what you implemented above). The second, called the *inner loop*, uses cross-validation on the training data only to select the best values of the model hyperparameters. The testing data is never used to choose the hyperparameters.
 
 > Coding the inner loop from scratch is tedious, especially when the model has several hyperparameters. Luckily, the `caret` package exists to automate hyperparameter tuning. Caret standardises syntax across packages to allow for many predictive models to be easily implemented. To train models and find the best hyperparameter(s), we use the `train()` function in `caret`. This function takes the following main arguments :
 >
@@ -349,59 +382,62 @@ plot_cv
 > - `y` : the vector of responses
 > - `method` : the name of the regression method to be used. A full list of methods implemented in caret [can be found here](https://topepo.github.io/caret/available-models.html). Ridge regression is implemented in `glmnet`, so the method name is "glmnet".
 > - `tuneGrid` : a data frame where each column is a named hyperparameter from the method, and each row is a unique combination of these hyperparameters to be used to fit a model to the training data. The `expand.grid()` function creates such a data frame from the values to try for each hyperparameter. For the "glmnet" method, the hyperparameters are `alpha` (0 for ridge regression) and `lambda`.
-> - `trControl` : an object created using the `trainControl()` function which defines how the tuning process should be performed. For example, `trainControl(method = "cv", number = 5)` uses a 5-fold cross-validation.
-> - `metric` : the metric to be optimised when choosing the *best* model. We will use "RMSE".
+> - `trControl` : an object created using the `trainControl()` function which defines how the tuning process should be performed. For example, `trainControl(method = "cv", number = 5)` implements 5-fold (inner) CV for deciding the hyperparameters.
+> - `metric` : the metric to be optimised when choosing the *best* model. We will use the root mean squared error (`metric` = "RMSE").
 >
 > The result of `train()` is a model which has been fitted on all the training data with the best hyperparameters. It can be used with `predict()` as before (with the testing predictors as the argument `newdata`), and the best hyperparameters are stored in its element `$bestTune`.
 
-> Implement a nested cross-validation for the ridge regression. Use the same 10 folds as in the previous section for the outer loop, and write the same `for` loop. This time, in each iteration, use `train()` to tune lambda on the training participants with a 5-fold inner cross-validation, among the values of lambda in the following grid. Store the predictions of the testing participants, and the best value of lambda selected in each iteration. Compute the two metrics, plot the predictions, and save the figure.
+> You are going to add 5-fold hyperparameter tuning in the ridge regression CV you implemented above. All this will require is to replace the call to `glmnet()` above with a call to `caret::train()`, using the arguments `method = "glmnet"`, `tuneGrid = ridge_grid`, and `trControl = trainControl(method = "cv", number = 5)`. As before, you may make predictions in the test set with the `predict()` function. Also, store the tuned values of the hyperparameter **lambda**, extracted from the `bestTune$lambda` of the `caret::train()` object. You may use the grid of hyperparameter options suggested below as inputs. 
 
 ```{r}
 lambda_grid <- c(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 3, 4, 5, 10, 20, 50, 100)
+
+ridge_grid = expand.grid(alpha = 0, lambda = lambda_grid)
 ```
+
+> As before, compute the sRMSE and R2 of your predictions. Do these differ much from the non-tuned approach in question 2, where we simply fixed the value of lambda at 1?
 
 > Is the value of lambda selected the same in every iteration of the outer loop? What does this tell us?
 
 <!-- solution:code -->
 ```{r}
-pred_ridge <- rep(NA_real_, n)
-best_lambda_ridge <- rep(NA_real_, length(folds))
+pred_ridge_tuned <- rep(NA_real_, n)
+best_lambda_ridge_tuned <- rep(NA_real_, length(folds))
 
 for (i in seq_along(folds)) {
   test_idx <- folds[[i]]
   train_idx <- setdiff(seq_len(n), test_idx)
 
   # Tune lambda on the training set only, with a 5-fold inner cross-validation
-  fit_ridge <- train(
+  fit_ridge_tuned <- train(
     x = X_mat[train_idx, ],
     y = y_vec[train_idx],
     method = "glmnet",
-    tuneGrid = expand.grid(alpha = 0, lambda = lambda_grid),
+    tuneGrid = ridge_grid,
     trControl = trainControl(method = "cv", number = 5),
     metric = "RMSE"
   )
 
   # Predict the testing set with the model fitted using the best lambda
-  pred_ridge[test_idx] <- predict(fit_ridge, newdata = X_mat[test_idx, ])
-  best_lambda_ridge[i] <- fit_ridge$bestTune$lambda
+  pred_ridge_tuned[test_idx] <- predict(fit_ridge_tuned, newdata = X_mat[test_idx, ])
+  best_lambda_ridge_tuned[i] <- fit_ridge_tuned$bestTune$lambda
 }
 
-best_lambda_ridge
+best_lambda_ridge_tuned
 
-metrics_ridge <- data.frame(
-  rmse = sqrt(mean((y_vec - pred_ridge) ^ 2)),
-  r2 = cor(y_vec, pred_ridge, method = "pearson") ^ 2
-)
-metrics_ridge
+metrics_ridge_tuned <- calculate_metrics(true = y_vec, predicted = pred_ridge_tuned)
+metrics_ridge_tuned
 
-plot_ridge <- plot_predictions(y_vec, pred_ridge, "Ridge regression : nested cross-validation")
-ggsave(here("output", "predictions_ridge_nested.pdf"), plot_ridge, width = 8, height = 8)
-plot_ridge
+plot_ridge_tuned <- plot_predictions(y_vec, pred_ridge_tuned, "Ridge regression : nested cross-validation")
+ggsave(here("output", "predictions_ridge_tuned.pdf"), plot_ridge_tuned, width = 8, height = 8)
+plot_ridge_tuned
+
+best_lambda_ridge_tuned
 ```
 <!-- /solution -->
 
 <!-- solution:text -->
-> **Answer:** *[To write : whether the selected lambda varies between iterations, and what this tells us about the hyperparameter and the sensitivity of the model to the training data.]*
+> **Answer:** The metrics are sRMSE = 0.772 and R2 = 0.42. These are slightly better than the predictions using the fixed hyperparameter approach above. However, these gains are minimal, suggesting that the impact of the choice of hyperparameters may not be of great importance. The optimal hyerparameter value was fixed at 5 across iterations, suggesting a stable hyperparameter selection procedure. 
 <!-- /solution -->
 
 # 4) Other models
@@ -433,13 +469,13 @@ for (i in seq_along(folds)) {
 }
 
 metrics_lasso <- data.frame(
-  rmse = sqrt(mean((y_vec - pred_lasso) ^ 2)),
+  sRMSE = sqrt(mean((y_vec - pred_lasso) ^ 2)),
   r2 = cor(y_vec, pred_lasso, method = "pearson") ^ 2
 )
 metrics_lasso
 
 plot_lasso <- plot_predictions(y_vec, pred_lasso, "Lasso regression : nested cross-validation")
-ggsave(here("output", "predictions_lasso_nested.pdf"), plot_lasso, width = 8, height = 8)
+ggsave(here("output", "predictions_lasso.pdf"), plot_lasso, width = 8, height = 8)
 plot_lasso
 ```
 <!-- /solution -->
@@ -472,13 +508,13 @@ for (i in seq_along(folds)) {
 }
 
 metrics_enet <- data.frame(
-  rmse = sqrt(mean((y_vec - pred_enet) ^ 2)),
+  sRMSE = sqrt(mean((y_vec - pred_enet) ^ 2)),
   r2 = cor(y_vec, pred_enet, method = "pearson") ^ 2
 )
 metrics_enet
 
 plot_enet <- plot_predictions(y_vec, pred_enet, "Elastic net regression : nested cross-validation")
-ggsave(here("output", "predictions_enet_nested.pdf"), plot_enet, width = 8, height = 8)
+ggsave(here("output", "predictions_enet.pdf"), plot_enet, width = 8, height = 8)
 plot_enet
 ```
 <!-- /solution -->
@@ -511,13 +547,13 @@ for (i in seq_along(folds)) {
 }
 
 metrics_pcr <- data.frame(
-  rmse = sqrt(mean((y_vec - pred_pcr) ^ 2)),
+  sRMSE = sqrt(mean((y_vec - pred_pcr) ^ 2)),
   r2 = cor(y_vec, pred_pcr, method = "pearson") ^ 2
 )
 metrics_pcr
 
 plot_pcr <- plot_predictions(y_vec, pred_pcr, "Principal component regression : nested cross-validation")
-ggsave(here("output", "predictions_pcr_nested.pdf"), plot_pcr, width = 8, height = 8)
+ggsave(here("output", "predictions_pcr.pdf"), plot_pcr, width = 8, height = 8)
 plot_pcr
 ```
 <!-- /solution -->
@@ -547,13 +583,13 @@ for (i in seq_along(folds)) {
 }
 
 metrics_pls <- data.frame(
-  rmse = sqrt(mean((y_vec - pred_pls) ^ 2)),
+  sRMSE = sqrt(mean((y_vec - pred_pls) ^ 2)),
   r2 = cor(y_vec, pred_pls, method = "pearson") ^ 2
 )
 metrics_pls
 
 plot_pls <- plot_predictions(y_vec, pred_pls, "Partial least squares regression : nested cross-validation")
-ggsave(here("output", "predictions_pls_nested.pdf"), plot_pls, width = 8, height = 8)
+ggsave(here("output", "predictions_pls.pdf"), plot_pls, width = 8, height = 8)
 plot_pls
 ```
 <!-- /solution -->
@@ -593,13 +629,13 @@ for (i in seq_along(folds)) {
 }
 
 metrics_rf <- data.frame(
-  rmse = sqrt(mean((y_vec - pred_rf) ^ 2)),
+  sRMSE = sqrt(mean((y_vec - pred_rf) ^ 2)),
   r2 = cor(y_vec, pred_rf, method = "pearson") ^ 2
 )
 metrics_rf
 
 plot_rf <- plot_predictions(y_vec, pred_rf, "Random forest : nested cross-validation")
-ggsave(here("output", "predictions_rf_nested.pdf"), plot_rf, width = 8, height = 8)
+ggsave(here("output", "predictions_rf.pdf"), plot_rf, width = 8, height = 8)
 plot_rf
 ```
 <!-- /solution -->
