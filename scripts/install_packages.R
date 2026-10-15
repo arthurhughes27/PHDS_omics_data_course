@@ -12,7 +12,6 @@ cran_packages <- c(
   "BiocManager",
   "caret",
   "dendextend",
-  "doParallel",
   "dplyr",
   "flashClust",
   "futile.logger",
@@ -22,8 +21,8 @@ cran_packages <- c(
   "glmnet",
   "here",
   "knitr",
-  "matrixStats",
   "pls",
+  "ranger",
   "readxl",
   "rmarkdown",
   "stringr",
@@ -37,7 +36,6 @@ bioc_packages <- c(
   "edgeR",
   "GEOquery",
   "limma",
-  "mixOmics",
   "pvca",
   "sva"
 )
