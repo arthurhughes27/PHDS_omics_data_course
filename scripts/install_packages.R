@@ -36,6 +36,7 @@ bioc_packages <- c(
   "edgeR",
   "GEOquery",
   "limma",
+  "mixOmics",
   "pvca",
   "sva"
 )

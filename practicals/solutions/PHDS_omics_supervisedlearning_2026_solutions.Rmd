@@ -665,3 +665,281 @@ model_metrics
 <!-- solution:text -->
 > **Answer:** Choosing the model with the best cross-validated performance, and then reporting that performance as our estimate of how well it would predict new participants, is over-optimistic. The cross-validated metrics are noisy estimates, which depend on the particular participants and on the random folds. The best of several noisy estimates is, on average, better than its true performance : the model that comes out on top is partly the model that was lucky on these data. The more models (and hyperparameter values) we compare, the larger this bias. It is the same problem as tuning the hyperparameters and evaluating the model on the same data, as in section 3, but now at the level of the choice of the model : the data which are used to select the model are also used to evaluate it. In our case, the models have very similar performances, so the apparent advantage of the best model could easily be due to chance. To obtain an unbiased estimate of the performance of the whole procedure, including the choice of the model, we need data which played no part in this choice : for example a separate testing set, or an additional outer layer of cross-validation which repeats the choice of the best model within each training set.
 <!-- /solution -->
+
+# 6) Interpreting the selected variables (optional)
+
+> In the previous exercises, we have focused on code implementation and on maximising the predictive accuracy of the models. However, an important part of predictive analysis is the interpretation of any *predictive signatures*. Different regression methods may have different natural ways to interpret the importance of the input variables for the response. For example, in multiple linear regression, we can interpret the effect size estimates, confidence intervals, and p-values for a test of non-zero effect size. Random forest has a metric called variable importance, which tells us the loss in predictive accuracy when a given variable's values are randomly permuted. 
+
+> In this section, we are going to use the example of a lasso regression. When using L1-regularised methods like lasso (and elastic net), we may choose to interpret the predictors which have non-zero coefficients (i.e. the *selected variables*). We will do this in two setups : a model fit on the entire dataset, as in question 1, and cross-validation, as in questions 2 to 4.
+
+## 6a) Variables selected by a model fit on the entire dataset
+
+> Fit a tuned lasso regression model on the **entire** dataset (i.e. ignore cross-validation for now), using `caret::train()` with `method = "glmnet"`, `alpha = 1` and a 5-fold cross-validation to tune lambda. The *final model*, which corresponds to the best value of lambda, can be accessed from the `$finalModel` element of the `train()` object, and the best value of lambda from its `$bestTune$lambda` element.
+
+> Extract the coefficients of the final model at the best value of lambda with the `coef()` function, using the argument `s` for the value of lambda. The output of `coef()` is not particularly easy to use : convert it to a matrix with `as.matrix()`, and then to a data frame with one row per gene and its coefficient. Keep only the genes with a non-zero coefficient (excluding the intercept), sorted by decreasing absolute value of the coefficient. How many genes have non-zero coefficients?
+
+<!-- solution:code -->
+```{r}
+# Fit and tune the lasso model on the whole dataset
+lasso_full <- train(
+  x = X_mat,
+  y = y_vec,
+  method = "glmnet",
+  tuneGrid = expand.grid(alpha = 1, lambda = lambda_grid),
+  trControl = trainControl(method = "cv", number = 5),
+  metric = "RMSE"
+)
+
+# The coefficients of the final model at the best lambda, as a matrix
+lasso_coef_mat <- as.matrix(coef(lasso_full$finalModel, s = lasso_full$bestTune$lambda))
+
+# One row per gene with a non-zero coefficient (excluding the intercept), sorted by decreasing size
+lasso_coefs <- data.frame(
+  gene = rownames(lasso_coef_mat),
+  coefficient = lasso_coef_mat[, 1]
+) %>%
+  filter(coefficient != 0, gene != "(Intercept)") %>%
+  arrange(desc(abs(coefficient)))
+
+message(nrow(lasso_coefs), " genes were selected.")
+head(lasso_coefs, 10)
+```
+<!-- /solution -->
+
+<!-- solution:text -->
+> **Answer:** `r nrow(lasso_coefs)` genes (out of `r ncol(X_mat)`) have non-zero coefficients.
+<!-- /solution -->
+
+> Since we standardised the predictors, the coefficients of the genes are on the same scale, and their absolute values can be compared. Make a bar plot of the coefficients of the (up to) 30 genes with the largest absolute coefficients, sorted by coefficient, and save the figure. What does the sign of a coefficient mean for the relationship between the gene and the antibody response? 
+
+<!-- solution:code -->
+```{r}
+plot_lasso_coefs <- head(lasso_coefs, 30) %>%
+  ggplot(aes(x = reorder(gene, coefficient), y = coefficient)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = "Gene", y = "Coefficient (standardised)", title = "Lasso regression : largest coefficients")
+
+ggsave(here("output", "lasso_coefficients.pdf"), plot_lasso_coefs, width = 8, height = 8)
+
+plot_lasso_coefs
+```
+<!-- /solution -->
+
+<!-- solution:text -->
+> **Answer:** *[To write : meaning of the sign of the coefficient. A positive coefficient means that a higher day-7 fold-change in the expression of the gene is associated with a higher antibody response, all the other genes being equal, and a negative coefficient means the opposite.]*
+<!-- /solution -->
+
+> Can you think of a way to interpret the names of the selected genes, to see whether particular biological processes are over-represented? 
+
+> Hint : you could paste the gene names, separated by commas, into a software which finds the biological functions they represent (for example the DAVID bioinformatics or Enrichr websites; even generative AI tools can give a quick idea). The `paste()` function with the argument `collapse = ", "` creates this string.
+
+<!-- solution:code -->
+```{r}
+paste(lasso_coefs$gene, collapse = ", ")
+```
+<!-- /solution -->
+
+<!-- solution:text -->
+> **Answer:** *[To write : the biological processes which seem to be over-represented among the selected genes.]*
+<!-- /solution -->
+
+## 6b) Variables selected in cross-validation
+
+> There is a limitation to the interpretation above : the selected genes depend on the particular data used to fit the model. If we had a slightly different sample of participants, would the same genes be selected? Furthermore, when genes are correlated with each other, the lasso tends to select one of them somewhat arbitrarily.
+
+> Cross-validation gives us a way to assess this. In each iteration of the cross-validation, a model is fit on a different part of the data, and may select different genes. With L1-regularisation methods like lasso and elastic net, we can therefore interpret the *proportion of folds in which each gene is selected*. These approaches can broadly be called *stability selection* methods, as genes which are more frequently selected are more *stable* predictors.
+
+> Modify your lasso cross-validation from question 4a (with the same outer folds), such that in each iteration you store the names of the genes with non-zero coefficients (as in 6a, using the model fitted by `train()` on the training data of the iteration). Then, compute the proportion of the 10 folds in which each gene was selected, and sort the genes from the most to the least frequently selected.
+
+<!-- solution:code -->
+```{r}
+# List which will contain, for each fold, the names of the selected genes
+lasso_selected <- vector("list", length(folds))
+
+for (i in seq_along(folds)) {
+  train_idx <- setdiff(seq_len(n), folds[[i]])
+  
+  # Tune the lasso on the training set, with a 5-fold inner cross-validation
+  fit_lasso_fold <- train(
+    x = X_mat[train_idx, ],
+    y = y_vec[train_idx],
+    method = "glmnet",
+    tuneGrid = expand.grid(alpha = 1, lambda = lambda_grid),
+    trControl = trainControl(method = "cv", number = 5),
+    metric = "RMSE"
+  )
+  
+  # The genes with non-zero coefficients in the final model of this fold
+  coef_mat_fold <- as.matrix(coef(fit_lasso_fold$finalModel, s = fit_lasso_fold$bestTune$lambda))
+  lasso_selected[[i]] <- setdiff(rownames(coef_mat_fold)[coef_mat_fold[, 1] != 0], "(Intercept)")
+}
+
+# The proportion of folds in which each gene was selected, sorted from the most to the least frequent
+selection_freq <- table(unlist(lasso_selected)) / length(folds)
+
+selection_df <- data.frame(
+  gene = names(selection_freq),
+  prop = as.numeric(selection_freq)
+) %>%
+  arrange(desc(prop))
+
+head(selection_df, 10)
+```
+<!-- /solution -->
+
+> How many genes were selected at least once? How many were selected in all of the folds? 
+
+<!-- solution:code -->
+```{r}
+c(
+  "at least once" = nrow(selection_df),
+  "in at least half of the folds" = sum(selection_df$prop >= 0.5),
+  "in all the folds" = sum(selection_df$prop == 1)
+)
+```
+<!-- /solution -->
+
+<!-- solution:text -->
+> **Answer:** `r nrow(selection_df)` genes were selected at least once, `r sum(selection_df$prop >= 0.5)` in at least half of the folds, and `r sum(selection_df$prop == 1)` in all the folds. *[To write : comment on how stable the selection is.]*
+<!-- /solution -->
+
+> Make a plot showing the proportion of selection on one axis and the gene names on the other axis, sorted from the most to the least frequently selected, for the genes selected in at least half of the folds. Save the figure.
+
+<!-- solution:code -->
+```{r}
+plot_selection <- selection_df %>%
+  filter(prop >= 0.5) %>%
+  ggplot(aes(x = reorder(gene, prop), y = prop)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = "Gene", y = "Proportion of folds in which the gene is selected",
+       title = "Selection frequency of the genes in cross-validation (lasso)")
+
+ggsave(here("output", "lasso_selection_frequency.pdf"), plot_selection, width = 8, height = 8)
+
+plot_selection
+```
+<!-- /solution -->
+
+> Finally, compare the two interpretations. Which of the genes selected by the model fit on the entire dataset (6a) are also frequently selected in cross-validation (e.g. in at least 80% of the folds)? How could you derive a *stable* predictive gene signature?
+
+<!-- solution:code -->
+```{r}
+# Genes selected by the model fit on the entire dataset, and in at least 80% of the folds
+stable_genes <- selection_df$gene[selection_df$prop >= 0.8]
+
+c(
+  "selected on the entire dataset" = nrow(lasso_coefs),
+  "selected in at least 80% of the folds" = length(stable_genes),
+  "both" = length(intersect(lasso_coefs$gene, stable_genes))
+)
+```
+<!-- /solution -->
+
+<!-- solution:text -->
+> **Answer:** `r length(intersect(lasso_coefs$gene, selection_df$gene[selection_df$prop >= 0.8]))` of the `r nrow(lasso_coefs)` genes selected on the entire dataset were selected in at least 80% of the folds. *[To write : how to derive a stable signature. For example, keep only the genes which are selected in a large proportion of the folds (e.g. at least 80%), since these do not depend on the particular sample of participants, rather than all the genes selected by the model fit on the entire dataset.]*
+<!-- /solution -->
+
+# 7) Sparse partial least squares with `mixOmics` (optional)
+
+> Sparse partial least squares (sPLS) is an approach which uses L1 (lasso) regularisation on the weighting vectors in a partial least squares approach. That is, it finds *sparse* components (made from a few genes only) which are maximally covarying with the response variable. This gives a way to select variables which is different from the lasso : the selected genes are those which contribute to the components.
+
+> We are going to implement this model using the `mixOmics` package, from Bioconductor. Unfortunately, this implementation is not available in `caret`, so we will have to use `mixOmics`'s own functions to tune the model. If you have not installed it yet, run the following chunk.
+
+```{r, eval = F}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("mixOmics")
+```
+
+> Note : we do not load `mixOmics` with `library()` : it replaces some functions of other packages (such as `select()` from `dplyr`). We will call its functions with the `mixOmics::` prefix.
+
+## 7a) Tuning the sPLS model
+
+> The sPLS model has two hyperparameters. The first is called `keepX`, which is the number of genes to keep for each component. This is roughly equivalent to tuning the strength of the penalty term, like we have done previously in this practical. The second is called `ncomp`, which is the number of components to keep.
+
+> Read the sPLS (regression) example on the [mixOmics site](https://mixomics.org/parameter-tuning/), and use the `mixOmics::tune.spls()` function on the entire dataset to determine the best values of `ncomp` and `keepX` (again, ignore the outer cross-validation for now : the function does its own cross-validation to tune the hyperparameters). Use the standardised genes `X_mat` as the predictors and the response `y_vec`. You could try up to 3 components, and test the numbers of genes to keep with, for example, `test.keepX = c(5, 10, 20, 50, 100)`. Use the arguments `mode = "regression"`, `validation = "Mfold"`, `folds = 5`, `measure = "MSE"` and `nrepeat = 3`, and plot the tuning results. Save the plot.
+
+> Note : there is a [known bug in the sPLS implementation in the regression setting](https://mixomics-users.discourse.group/t/error-in-check-entry-pls-x-y-ncomp-keepx-keepy-mode-mode-scale-scale-unmapped-y-contains-samples-with-no-associated-class-may-be-caused-by-nas-in-input-y-vector/1202/7), which may give you an error `Unmapped Y contains samples with no associated class`. This seems to be a problem when some values of the response are 0 : a workaround is to give the response as a matrix (`as.matrix()`) and to add a small value like 0.000001 to the response values, and the error should go away.
+
+<!-- solution:code -->
+```{r}
+# The response as a matrix, with the workaround for the known bug
+y_spls <- as.matrix(y_vec) + 0.000001
+
+spls_tuning <- mixOmics::tune.spls(
+  X = X_mat,
+  Y = y_spls,
+  ncomp = 3,
+  test.keepX = c(5, 10, 20, 50, 100),
+  validation = "Mfold",
+  folds = 5,
+  measure = "MSE",
+  mode = "regression",
+  nrepeat = 3
+)
+
+# Plot the tuning results, and save the plot as a PDF
+plot(spls_tuning)
+
+pdf(here("output", "spls_tuning.pdf"), width = 8, height = 6)
+print(plot(spls_tuning))
+invisible(dev.off())
+
+# The best number of components, and the best number of genes to keep for each component
+spls_best_ncomp <- spls_tuning$choice.ncomp[[1]]
+spls_best_keepX <- spls_tuning$choice.keepX[seq_len(spls_best_ncomp)]
+
+spls_best_ncomp
+spls_best_keepX
+```
+<!-- /solution -->
+
+<!-- solution:text -->
+> **Answer:** The best number of components is `r spls_best_ncomp`, keeping `r paste(spls_best_keepX, collapse = ", ")` gene(s) for the component(s). *[To write : comment on the tuning plot, and whether the selected values lie at the edge of the grid.]*
+<!-- /solution -->
+
+## 7b) Fitting the final sPLS model
+
+> Now, with your best values of `ncomp` and `keepX`, fit a final model to the entire dataset with `mixOmics::spls()`. Extract the names of the genes with non-zero loading weights on the first component with `mixOmics::selectVar()` (argument `comp = 1`; the names are in the element `$X$name` of the result). Plot the loading weights of these genes with `mixOmics::plotLoadings()` (with the arguments `method = "mean"` and `contrib = "max"`), and save the plot. [The following guide may help](https://mixomics.org/methods/spls/).
+
+<!-- solution:code -->
+```{r}
+spls_final <- mixOmics::spls(X_mat, y_spls, keepX = spls_best_keepX, ncomp = spls_best_ncomp)
+
+# The genes with non-zero loading weights on the first component
+spls_gene_signature <- mixOmics::selectVar(spls_final, comp = 1)$X$name
+spls_gene_signature
+
+# Plot the loading weights of these genes, and save the plot as a PDF
+mixOmics::plotLoadings(spls_final, method = "mean", contrib = "max")
+
+pdf(here("output", "spls_loadings.pdf"), width = 8, height = 8)
+mixOmics::plotLoadings(spls_final, method = "mean", contrib = "max")
+invisible(dev.off())
+```
+<!-- /solution -->
+
+> How many genes are selected on the first component? How many of them were also selected by the lasso model fit on the entire dataset (question 6a)? How can we interpret these genes?
+
+<!-- solution:code -->
+```{r}
+c(
+  "selected by sPLS (component 1)" = length(spls_gene_signature),
+  "selected by lasso (6a)" = nrow(lasso_coefs),
+  "both" = length(intersect(spls_gene_signature, lasso_coefs$gene))
+)
+```
+<!-- /solution -->
+
+<!-- solution:text -->
+> **Answer:** `r length(spls_gene_signature)` genes are selected on the first component, of which `r length(intersect(spls_gene_signature, lasso_coefs$gene))` were also selected by the lasso. *[To write : interpretation of the genes. The sign of a loading weight shows the direction of the contribution of the gene to the component, and the component is the combination of genes which covaries the most with the antibody response.]*
+<!-- /solution -->
+
+> The hyperparameters were tuned on the entire dataset, as were the final model and its selected genes. What would you do to assess the stability of the sPLS gene signature, as we did for the lasso in question 6b?
+
+<!-- solution:text -->
+> **Answer:** *[To write : repeat the tuning and the selection of the genes within each training set of a cross-validation, and compute the proportion of folds in which each gene is selected, as for the lasso.]*
+<!-- /solution -->
