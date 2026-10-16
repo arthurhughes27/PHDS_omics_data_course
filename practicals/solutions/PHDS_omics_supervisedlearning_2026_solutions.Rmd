@@ -860,25 +860,14 @@ spls_best_keepX
 > **Answer:** The best number of components is `r spls_best_ncomp`, keeping `r paste(spls_best_keepX, collapse = ", ")` gene(s) for the component(s).
 <!-- /solution -->
 
-## 7b) Fitting the final sPLS model
 
-> Now, with your best values of `ncomp` and `keepX`, fit a final model to the entire dataset with `mixOmics::spls()`. Extract the names of the genes with non-zero loading weights on the first component with `mixOmics::selectVar()` (argument `comp = 1`; the names are in the element `$X$name` of the result).
+## 7b) sPLS in a cross-validation setup
 
-<!-- solution:code -->
-```{r}
-spls_final <- mixOmics::spls(X_mat, y_spls, keepX = spls_best_keepX, ncomp = spls_best_ncomp)
-```
-<!-- /solution -->
-
-
-
-## 7c) sPLS in a cross-validation setup
-
-> In 7a, we tuned the hyperparameters of the sPLS model on the entire dataset. We cannot use this model to evaluate the predictive performance of sPLS : as we saw in section 3, the hyperparameters were chosen using all the participants, so the evaluation would be over-optimistic. To evaluate sPLS fairly, and to compare it with the other models, we need to implement a nested cross-validation, as we did for the other models. Since sPLS is not available in `caret`, you have to code the steps yourself with the `mixOmics` functions.
+> In 7a, we tuned the hyperparameters of the sPLS model on the entire dataset. To evaluate sPLS fairly, and to compare it with the other models, we need to implement a nested cross-validation, as we did for the other models. Since sPLS is not available in `caret`, you have to code the steps yourself with the `mixOmics` functions.
 
 > Use the same 10 outer folds as before (`folds`), and write a `for` loop over the folds. In each iteration :
 >
-> - Tune `ncomp` and `keepX` on the training participants only, with `mixOmics::tune.spls()` as in 7a (to save time, you may use `nrepeat = 1`), and extract the best values.
+> - Tune `ncomp` and `keepX` on the training participants only, with `mixOmics::tune.spls()` as in 7a, and extract the best values.
 > - Fit a sPLS model with these values on the training participants with `mixOmics::spls()`.
 > - Predict the response of the testing participants with the `predict()` function, giving the testing predictors as the argument `newdata`. The predictions are in the element `$predict` of the result, which is an array with three dimensions : participants, responses (here, just one) and components. Take the predictions for your response and for the number of components of the model.
 >
@@ -902,7 +891,7 @@ for (i in seq_along(folds)) {
     folds = 5,
     measure = "MSE",
     mode = "regression",
-    nrepeat = 1
+    nrepeat = 3
   )
   ncomp_fold <- tuning_fold$choice.ncomp[[1]]
   keepX_fold <- tuning_fold$choice.keepX[seq_len(ncomp_fold)]
@@ -945,5 +934,5 @@ model_metrics_with_spls
 <!-- /solution -->
 
 <!-- solution:text -->
-> **Answer:** The sPLS model has sRMSE = `r sprintf("%.3f", metrics_spls$sRMSE)` and R2 = `r sprintf("%.3f", metrics_spls$R2)`, compared with sRMSE = `r sprintf("%.3f", min(model_metrics$sRMSE))` for the best of the other models (`r model_metrics$model[which.min(model_metrics$sRMSE)]`). *[To write : comment on the performance of sPLS relative to the other models. The models are likely to perform similarly, so the choice may depend on other criteria, such as interpretability : sPLS selects a small number of genes, which is an advantage over PLS or PCR, which use all the genes.]*
+> **Answer:** The sPLS model has sRMSE = `r sprintf("%.3f", metrics_spls$sRMSE)` and R2 = `r sprintf("%.3f", metrics_spls$R2)`, compared with sRMSE = `r sprintf("%.3f", min(model_metrics$sRMSE))` for the best of the other models (`r model_metrics$model[which.min(model_metrics$sRMSE)]`). 
 <!-- /solution -->

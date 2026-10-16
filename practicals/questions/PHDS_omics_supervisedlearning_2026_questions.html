@@ -1023,6 +1023,207 @@ the best predictions in our cross-validation framework. Comment on how
 this strategy could introduce bias into our results.</p>
 </blockquote>
 </div>
+<div id="interpreting-the-selected-variables-optional" class="section level1">
+<h1>6) Interpreting the selected variables (optional)</h1>
+<blockquote>
+<p>In the previous exercises, we have focused on code implementation and
+on maximising the predictive accuracy of the models. However, an
+important part of predictive analysis is the interpretation of any
+<em>predictive signatures</em>. Different regression methods may have
+different natural ways to interpret the importance of the input
+variables for the response. For example, in multiple linear regression,
+we can interpret the effect size estimates, confidence intervals, and
+p-values for a test of non-zero effect size. Random forest has a metric
+called variable importance, which tells us the loss in predictive
+accuracy when a given variable’s values are randomly permuted.</p>
+</blockquote>
+<blockquote>
+<p>In this section, we are going to use the example of a lasso
+regression. When using L1-regularised methods like lasso (and elastic
+net), we may choose to interpret the predictors which have non-zero
+coefficients (i.e. the <em>selected variables</em>). We will do this in
+two setups : a model fit on the entire dataset, as in question 1, and
+cross-validation, as in questions 2 to 4.</p>
+</blockquote>
+<div id="a-variables-selected-by-a-model-fit-on-the-entire-dataset" class="section level2">
+<h2>6a) Variables selected by a model fit on the entire dataset</h2>
+<blockquote>
+<p>Fit a tuned lasso regression model on the <strong>entire</strong>
+dataset (i.e. ignore cross-validation for now), using
+<code>caret::train()</code> with <code>method = &quot;glmnet&quot;</code>,
+<code>alpha = 1</code> and a 5-fold cross-validation to tune lambda. The
+<em>final model</em>, which corresponds to the best value of lambda, can
+be accessed from the <code>$finalModel</code> element of the
+<code>train()</code> object, and the best value of lambda from its
+<code>$bestTune$lambda</code> element.</p>
+</blockquote>
+<blockquote>
+<p>Extract the coefficients of the final model at the best value of
+lambda with the <code>coef()</code> function, using the argument
+<code>s</code> for the value of lambda. The output of
+<code>coef()</code> is not particularly easy to use : convert it to a
+matrix with <code>as.matrix()</code>, and then to a data frame with one
+row per gene and its coefficient. Keep only the genes with a non-zero
+coefficient (excluding the intercept), sorted by decreasing absolute
+value of the coefficient. How many genes have non-zero coefficients?</p>
+</blockquote>
+<pre class="r"><code># Your code here</code></pre>
+<blockquote>
+<p>Since we standardised the predictors, the coefficients of the genes
+are on the same scale, and their absolute values can be compared. Make a
+bar plot of the coefficients of the (up to) 30 genes with the largest
+absolute coefficients, sorted by coefficient, and save the figure. What
+does the sign of a coefficient mean for the relationship between the
+gene and the antibody response?</p>
+</blockquote>
+<pre class="r"><code># Your code here</code></pre>
+<blockquote>
+<p>Can you think of a way to interpret the names of the selected genes,
+to see whether particular biological processes are over-represented?</p>
+</blockquote>
+<pre class="r"><code># Your code here</code></pre>
+</div>
+<div id="b-variables-selected-in-cross-validation" class="section level2">
+<h2>6b) Variables selected in cross-validation</h2>
+<blockquote>
+<p>There is a limitation to the interpretation above : the selected
+genes depend on the particular data used to fit the model. If we had a
+slightly different sample of participants, would the same genes be
+selected?</p>
+</blockquote>
+<blockquote>
+<p>Cross-validation gives us a way to assess this. In each iteration of
+the cross-validation, a model is fit on a different part of the data,
+and may select different genes. With L1-regularisation methods like
+lasso and elastic net, we can therefore interpret the <em>proportion of
+folds in which each gene is selected</em>. These approaches can broadly
+be called <em>stability selection</em> methods, as genes which are more
+frequently selected are more <em>stable</em> predictors.</p>
+</blockquote>
+<blockquote>
+<p>Modify your lasso cross-validation from question 4a (with the same
+outer folds), such that in each iteration you store the names of the
+genes with non-zero coefficients (as in 6a, using the model fitted by
+<code>train()</code> on the training data of the iteration). Then,
+compute the proportion of the 10 folds in which each gene was selected,
+and sort the genes from the most to the least frequently selected.</p>
+</blockquote>
+<pre class="r"><code># Your code here</code></pre>
+<blockquote>
+<p>Make a plot showing the proportion of selection on one axis and the
+gene names on the other axis, sorted from the most to the least
+frequently selected, for the genes selected in at least half of the
+folds. Save the figure.</p>
+</blockquote>
+<pre class="r"><code># Your code here</code></pre>
+</div>
+</div>
+<div id="sparse-partial-least-squares-with-mixomics-optional" class="section level1">
+<h1>7) Sparse partial least squares with <code>mixOmics</code>
+(optional)</h1>
+<blockquote>
+<p>Sparse partial least squares (sPLS) is an approach which uses L1
+(lasso) regularisation on the weighting vectors in a partial least
+squares approach. That is, it finds <em>sparse</em> components (made
+from a few genes only) which are maximally covarying with the response
+variable. This gives a way to select variables which is different from
+the lasso : the selected genes are those which contribute to the
+components.</p>
+</blockquote>
+<blockquote>
+<p>We are going to implement this model using the <code>mixOmics</code>
+package, from Bioconductor. Unfortunately, this implementation is not
+available in <code>caret</code>, so we will have to use
+<code>mixOmics</code>’s own functions to tune the model. If you have not
+installed it yet, run the following chunk.</p>
+</blockquote>
+<pre class="r"><code>if (!requireNamespace(&quot;BiocManager&quot;, quietly = TRUE))
+  install.packages(&quot;BiocManager&quot;)
+
+BiocManager::install(&quot;mixOmics&quot;)</code></pre>
+<blockquote>
+<p>Note : we do not load <code>mixOmics</code> with
+<code>library()</code> : it replaces some functions of other packages
+(such as <code>select()</code> from <code>dplyr</code>). We will call
+its functions with the <code>mixOmics::</code> prefix.</p>
+</blockquote>
+<div id="a-tuning-the-spls-model" class="section level2">
+<h2>7a) Tuning the sPLS model</h2>
+<blockquote>
+<p>The sPLS model has two hyperparameters. The first is called
+<code>keepX</code>, which is the number of genes to keep for each
+component. This is roughly equivalent to tuning the strength of the
+penalty term, like we have done previously in this practical. The second
+is called <code>ncomp</code>, which is the number of components to
+keep.</p>
+</blockquote>
+<blockquote>
+<p>Read the sPLS (regression) example on the <a href="https://mixomics.org/parameter-tuning/">mixOmics site</a>, and use
+the <code>mixOmics::tune.spls()</code> function on the entire dataset to
+determine the best values of <code>ncomp</code> and <code>keepX</code>
+(again, ignore the outer cross-validation for now : the function does
+its own cross-validation to tune the hyperparameters). Use the
+standardised genes <code>X_mat</code> as the predictors and the response
+<code>y_vec</code>. You could try up to 3 components, and test the
+numbers of genes to keep with, for example,
+<code>test.keepX = c(5, 10, 20, 50, 100)</code>. Use the arguments
+<code>mode = &quot;regression&quot;</code>, <code>validation = &quot;Mfold&quot;</code>,
+<code>folds = 5</code>, <code>measure = &quot;MSE&quot;</code> and
+<code>nrepeat = 3</code>, and plot the tuning results. Save the
+plot.</p>
+</blockquote>
+<blockquote>
+<p>Note : there is a <a href="https://mixomics-users.discourse.group/t/error-in-check-entry-pls-x-y-ncomp-keepx-keepy-mode-mode-scale-scale-unmapped-y-contains-samples-with-no-associated-class-may-be-caused-by-nas-in-input-y-vector/1202/7">known
+bug in the sPLS implementation in the regression setting</a>, which may
+give you an error
+<code>Unmapped Y contains samples with no associated class</code>. This
+seems to be a problem when some values of the response are 0 : a
+workaround is to give the response as a matrix
+(<code>as.matrix()</code>) and to add a small value like 0.000001 to the
+response values, and the error should go away.</p>
+</blockquote>
+<pre class="r"><code># Your code here</code></pre>
+</div>
+<div id="b-spls-in-a-cross-validation-setup" class="section level2">
+<h2>7b) sPLS in a cross-validation setup</h2>
+<blockquote>
+<p>In 7a, we tuned the hyperparameters of the sPLS model on the entire
+dataset. To evaluate sPLS fairly, and to compare it with the other
+models, we need to implement a nested cross-validation, as we did for
+the other models. Since sPLS is not available in <code>caret</code>, you
+have to code the steps yourself with the <code>mixOmics</code>
+functions.</p>
+</blockquote>
+<blockquote>
+<p>Use the same 10 outer folds as before (<code>folds</code>), and write
+a <code>for</code> loop over the folds. In each iteration :</p>
+<ul>
+<li>Tune <code>ncomp</code> and <code>keepX</code> on the training
+participants only, with <code>mixOmics::tune.spls()</code> as in 7a, and
+extract the best values.</li>
+<li>Fit a sPLS model with these values on the training participants with
+<code>mixOmics::spls()</code>.</li>
+<li>Predict the response of the testing participants with the
+<code>predict()</code> function, giving the testing predictors as the
+argument <code>newdata</code>. The predictions are in the element
+<code>$predict</code> of the result, which is an array with three
+dimensions : participants, responses (here, just one) and components.
+Take the predictions for your response and for the number of components
+of the model.</li>
+</ul>
+<p>Store the predictions of all the participants in a vector, as before.
+Then compute the metrics, plot the predictions, and save the figure.</p>
+</blockquote>
+<pre class="r"><code># Your code here</code></pre>
+<blockquote>
+<p>Finally, add the metrics of the sPLS model to the table of the
+metrics of the other models (<code>model_metrics</code>, from section
+5), and save the new table in your <code>output</code> folder. How does
+the sPLS model compare with the other models?</p>
+</blockquote>
+<pre class="r"><code># Your code here</code></pre>
+</div>
+</div>
 
 
 
