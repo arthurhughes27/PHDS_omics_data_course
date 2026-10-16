@@ -296,7 +296,7 @@ results_mix
 > **Answer:** The false positive rate is a proportion *of the negatives* : 5% of them are declared significant, whatever their number. So the number of false positives is about 5% of the number of negatives, and it grows with it : with 10,000 negatives, about 500 of them are declared significant. The number of true positives, on the other hand, cannot exceed the 100 positives. The false discovery proportion, FP / (FP + TP), is therefore more and more dominated by the false positives. A 5% false positive rate guarantees that 5% of the negatives are wrongly declared significant, not that 5% of the discoveries are false : the two answer different questions, and **controlling the false positive rate does not control the false discovery proportion**.
 <!-- /solution -->
 
-> The following chunk repeats the simulation for an increasing number of negatives (always with 100 positives), and plots the three quantities as a function of the proportion of negatives among all the genes. To reduce the random variation, each setting is repeated 10 times and the results are averaged.
+> The following chunk runs the simulation for an increasing number of negatives (always with 100 positives), and plots the three quantities as a function of the proportion of negatives among all the genes.
 
 > Look at the three plots. What do they show? From which proportion of negatives are more than half of the discoveries false?
 
@@ -307,10 +307,8 @@ summary_1c <- lapply(n_neg_values, function(n_neg) {
   is_pos <- rep(c(TRUE, FALSE), c(n_pos, n_neg))
   delta <- ifelse(is_pos, delta_pos, 0)
 
-  # No need to repeat 10 times.
-  lapply(1:10, function(repetition) evaluate_decision(simulate_pvalues(delta) < 0.05, is_pos)) %>%
-    bind_rows() %>%
-    summarise(across(c(power, FPR, FDP), mean)) %>%
+  evaluate_decision(simulate_pvalues(delta) < 0.05, is_pos) %>%
+    select(power, FPR, FDP) %>%
     mutate(prop_neg = n_neg / (n_pos + n_neg))
 }) %>%
   bind_rows()
@@ -337,7 +335,7 @@ plot_fdp_1c
 ```
 
 <!-- solution:text -->
-> **Answer:** The power and the false positive rate stay constant (at almost 100% and about 5%) whatever the proportion of negatives, whereas the false discovery proportion increases steadily towards 100% as the proportion of negatives increases. With 100 positives, more than half of the discoveries are false once there are more than about 2,000 negatives (a proportion of negatives above about 95%), since 5% of 2,000 is 100 false positives for about 100 true positives. On the grid used here, the false discovery proportion is above 50% from a proportion of negatives of `r sprintf("%.0f", 100 * min(summary_1c$prop_neg[summary_1c$FDP > 0.5]))`%. In omics studies, we can often expect that a large number of variables are true negatives. For example, in transcriptomics, a large proportion of our genes have functions related to routine cellular processes which are not expected to be impacted by exposure. Therefore, in these cases, we can expect a large part of the genes declared significant at the 5% level to be false discoveries.
+> **Answer:** The power and the false positive rate stay roughly constant (at almost 100% and about 5%, apart from some random variation) whatever the proportion of negatives, whereas the false discovery proportion increases steadily towards 100% as the proportion of negatives increases. With 100 positives, more than half of the discoveries are false once there are more than about 2,000 negatives (a proportion of negatives above about 95%), since 5% of 2,000 is 100 false positives for about 100 true positives. On the grid used here, the false discovery proportion is above 50% from a proportion of negatives of `r sprintf("%.0f", 100 * min(summary_1c$prop_neg[summary_1c$FDP > 0.5]))`%. In omics studies, we can often expect that a large number of variables are true negatives. For example, in transcriptomics, a large proportion of our genes have functions related to routine cellular processes which are not expected to be impacted by exposure. Therefore, in these cases, we can expect a large part of the genes declared significant at the 5% level to be false discoveries.
 <!-- /solution -->
 
 ## 1d) Correcting for multiple testing : Bonferroni and Benjamini-Hochberg
@@ -373,12 +371,6 @@ results_bonferroni <- evaluate_decision(p_bonferroni < 0.05, is_pos)
 results_bonferroni
 ```
 
-> Compared with no correction, what happens to FP, TP and FN? What have we gained and what have we lost?
-
-<!-- solution:text -->
-> **Answer:** The number of false positives drops from FP = `r results_none$FP` to FP = `r results_bonferroni$FP` : Bonferroni removes (nearly) all the false positives, so the false discovery proportion goes from `r sprintf("%.0f", 100 * results_none$FDP)`% to `r sprintf("%.0f", 100 * results_bonferroni$FDP)`%. The price is that the number of true positives decreases from TP = `r results_none$TP` to TP = `r results_bonferroni$TP`, and the number of false negatives increases from FN = `r results_none$FN` to FN = `r results_bonferroni$FN` : the threshold is so strict that some genes which are truly different are missed. The power drops from `r sprintf("%.0f", 100 * results_none$power)`% to `r sprintf("%.0f", 100 * results_bonferroni$power)`%.
-<!-- /solution -->
-
 > **The Benjamini-Hochberg (BH) correction** controls the FDR. It ranks the p-values from the smallest to the largest, p(1) <= p(2) <= ... <= p(m). It finds the largest rank k such that p(k) <= (k / m) x 0.05, and declares significant the k genes with the smallest p-values. The threshold (k / m) x 0.05 increases with the rank, so for the first genes it is as strict as Bonferroni, but it becomes much more permissive as more discoveries are made.
 
 ```{r}
@@ -388,13 +380,7 @@ results_bh <- evaluate_decision(p_bh < 0.05, is_pos)
 results_bh
 ```
 
-> Compared with the Bonferroni correction, what happens to FP, TP and FN, and to the false discovery proportion?
-
-<!-- solution:text -->
-> **Answer:** The BH correction finds many more true positives than Bonferroni (TP = `r results_bh$TP` against `r results_bonferroni$TP`) and misses fewer (FN = `r results_bh$FN` against `r results_bonferroni$FN`), at the price of a few false positives (FP = `r results_bh$FP`, against `r results_bonferroni$FP` for Bonferroni). Its false discovery proportion is `r sprintf("%.0f", 100 * results_bh$FDP)`%, around the 5% that the method controls on average, and much lower than with no correction (`r sprintf("%.0f", 100 * results_none$FDP)`%).
-<!-- /solution -->
-
-> Here are the three results side by side. You should ask the questions here, instead of doing it bit by bit. 
+> Here are the three results side by side.
 
 ```{r}
 bind_rows(
@@ -403,6 +389,12 @@ bind_rows(
 ) %>%
   mutate(across(c(power, FPR, FDP), ~ round(.x, 3)))
 ```
+
+> Compare the three results. What happens to the numbers of false positives (FP), true positives (TP) and false negatives (FN) with each correction, and to the three rates? What does each correction gain, and what does it cost? Which error rate does each of them control?
+
+<!-- solution:text -->
+> **Answer:** With no correction, there are many false positives (FP = `r results_none$FP`, so a false discovery proportion of `r sprintf("%.0f", 100 * results_none$FDP)`%) but all (or nearly all) the positives are found (TP = `r results_none$TP`, FN = `r results_none$FN`). The **Bonferroni** correction removes (nearly) all the false positives (FP = `r results_bonferroni$FP`) and controls the FWER, the probability of making at least one false positive. The price is a loss of power : the threshold 0.05 / m is so strict that some of the positives are missed (TP = `r results_bonferroni$TP` and FN = `r results_bonferroni$FN`, a power of `r sprintf("%.0f", 100 * results_bonferroni$power)`%). The **Benjamini-Hochberg** correction accepts a few false positives (FP = `r results_bh$FP`) in order to find many more positives than Bonferroni (TP = `r results_bh$TP`, FN = `r results_bh$FN`, a power of `r sprintf("%.0f", 100 * results_bh$power)`%). It controls the FDR : its false discovery proportion (`r sprintf("%.0f", 100 * results_bh$FDP)`% here) is, on average over many studies, at most 5%. Both corrections also lower the false positive rate, to almost 0. If you re-run the simulation, the numbers change, as each run is a new study, but the pattern stays the same.
+<!-- /solution -->
 
 > Which correction would you choose in each of the following situations ? (a) A confirmatory study, in which the few genes found significant will be used to take a clinical decision. (b) An exploratory study of 20,000 genes, to find candidate genes to be followed up in other experiments.
 
