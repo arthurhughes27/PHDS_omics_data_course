@@ -804,6 +804,13 @@ metadata_all <- metadata_all %>%
 design <- model.matrix(~ testGroup, data = metadata_all)
 ```
 
+<!-- solution:text -->
+```{r, include = FALSE}
+# For the test multiplicity practical : save the batch-corrected counts and the metadata (with testGroup)
+save(counts_combat, metadata_all, file = here("data-raw", "TB_batch_corrected.RData"))
+```
+<!-- /solution -->
+
 > Extract a vector of the names of the DEGs. How many genes are differentially expressed according to this criterion?
 
 <!-- solution:code -->

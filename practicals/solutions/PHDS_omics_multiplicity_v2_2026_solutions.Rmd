@@ -55,8 +55,9 @@ omics_practicals/
 
 ### Add the files
 
-> 1. Copy this practical (the `.Rmd` file) into the `analysis` folder.
-> 2. In the `Files` pane of RStudio, open the `analysis` folder and click on the `.Rmd` file to open it.
+> 1. Copy the data file I sent you, `TB_batch_corrected.RData`, into the `data-raw` folder (we will use it in the second part).
+> 2. Copy this practical (the `.Rmd` file) into the `analysis` folder.
+> 3. In the `Files` pane of RStudio, open the `analysis` folder and click on the `.Rmd` file to open it.
 
 > **Important:** always start your work by opening the project (double-click the `.Rproj` file, or use `File > Open Project`), and open the `.Rmd` file from *within* RStudio's `Files` pane. If you open the `.Rmd` file directly from your Downloads folder, it will not be part of the project and the paths below will not work.
 
@@ -66,7 +67,7 @@ omics_practicals/
 
 ## 0b) Install and load the required packages
 
-> If you ran the installation script I sent you, all the packages are already installed. Otherwise, the following chunk checks which of the packages needed for this practical you are missing and installs them : `dplyr`, `tidyr`, `ggplot2` and `here`.
+> If you ran the installation script I sent you, all the packages are already installed. Otherwise, the following chunk checks which of the packages needed for this practical you are missing and installs them : `dplyr`, `tidyr`, `ggplot2` and `here` (from CRAN), and `edgeR` and `limma` (from Bioconductor).
 
 ```{r, echo = F, results = 'hide', message = F}
 # This sets the options for the outputs when knitting the rmd file
@@ -81,6 +82,15 @@ cran_packages <- c("dplyr", "tidyr", "ggplot2", "here")
 
 # Install missing CRAN packages
 install.packages(setdiff(cran_packages, installed.packages()[, "Package"]))
+
+# ---- BioConductor Packages ----
+bioc_packages <- c("edgeR", "limma")
+
+# Load BiocManager and install missing Bioconductor packages
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install(setdiff(bioc_packages, installed.packages()[, "Package"]))
 ```
 
 > Now load the packages.
@@ -90,6 +100,8 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(here)
+library(edgeR)
+library(limma)
 
 # Default look of all the ggplot2 figures
 theme_set(theme_minimal(base_size = 14))
@@ -100,10 +112,14 @@ set.seed(123)
 
 ## 0c) Check your project setup
 
-> Run the following chunk to check that everything is in the right place. It should print the path to your project folder (the one containing the `.Rproj` file).
+> Run the following chunk to check that everything is in the right place. The first line should print the path to your project folder (the one containing the `.Rproj` file), and the data file should be found.
 
 ```{r}
+# Path to the root of the project
 here()
+
+# Check that the data file exists
+file.exists(here("data-raw", "TB_batch_corrected.RData"))
 ```
 
 # 1) Demonstration on simulated data
@@ -401,3 +417,42 @@ bind_rows(
 <!-- solution:text -->
 > **Answer:** (a) A correction which controls the FWER (Bonferroni), since a single false positive is costly : we want to be nearly sure that none of the genes is wrong. (b) A correction which controls the FDR (Benjamini-Hochberg), since the candidates will be validated afterwards : we accept a small proportion of false leads in exchange for finding more of the true genes.
 <!-- /solution -->
+
+# 2) Application to real data : differential gene expression in tuberculosis
+
+> We now come back to real data. We use the transcriptomic data from [Singhania et al, 2018](https://www.nature.com/articles/s41467-018-04579-w) that you analysed in the genomics data analysis practical : blood samples from healthy controls, patients with latent tuberculosis infection (LTBI) and patients with active tuberculosis, collected in three cohorts. As in that practical, we compare the patients with **active tuberculosis** to the others (the controls and the LTBI patients grouped together), and we look for the genes that are **differentially expressed** between the two groups.
+
+> This is the same question as in the simulations of the first part, but this time we do not know the truth : for each of the thousands of genes, we do not know whether it is really differentially expressed.
+
+## 2a) Differential expression analysis
+
+> The data file contains the data after the pre-processing steps of the previous practical : the raw counts after filtering and batch correction with ComBat-Seq (`counts_combat`, with one row per gene and one column per sample), and the information on the samples (`metadata_all`), including the variable `testGroup`, which groups the controls and the LTBI patients into one control group, and the active tuberculosis patients into the other group. Load the data.
+
+```{r}
+load(here("data-raw", "TB_batch_corrected.RData"))
+
+# Number of genes (rows) and samples (columns), and number of samples in each group
+dim(counts_combat)
+table(metadata_all$testGroup)
+```
+
+> We perform the differential expression analysis with the voom-limma pipeline, as in the previous practical. For each gene, it tests whether its mean expression differs between the active tuberculosis patients and the control group, and returns a p-value. You do not need to understand the details of the pipeline here : what matters is its output, a table with one row per gene and one p-value per gene (the column `P.Value`).
+
+```{r}
+# Design matrix : the coefficient "testGroupActiveTB" compares ActiveTB to control
+design <- model.matrix(~ testGroup, data = metadata_all)
+
+# TMM normalisation factors, then the mean-variance relationship with voom()
+dge <- DGEList(counts = counts_combat, group = metadata_all$testGroup) %>%
+  calcNormFactors(method = "TMM")
+voom_data <- voom(dge, design)
+
+# Fit the linear models, then compute the empirical Bayes moderated tests
+fit <- lmFit(voom_data, design)
+fit <- eBayes(fit, robust = TRUE)
+
+# One row per gene, with the log2 fold-change (logFC) and the raw p-value (P.Value)
+results_dge <- topTable(fit, coef = 2, n = Inf)
+
+head(results_dge)
+```
