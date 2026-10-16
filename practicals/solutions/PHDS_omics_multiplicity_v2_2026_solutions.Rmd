@@ -140,83 +140,74 @@ simulate_pvalues <- function(delta, n = 10) {
 }
 ```
 
-> Let's now simulate 100 genes none of which is truly different (`delta = 0` for all genes), and look at their p-values. Now try increasing the number of genes (for example, to 1000, 10,000, or 100,000). What happens to the shape of the histogram when the number of genes increases? What distribution does this resemble? Why do you think this is?
+> Let's now simulate 100 genes, none of which is truly different (`delta = 0` for all genes), and look at their p-values. The dashed horizontal line shows what a perfectly flat distribution would look like, and the red line marks 0.05. **Try it** : now increase the number of genes (for example to 1,000, 10,000 or 100,000) and re-run the chunk. What happens to the shape of the histogram when the number of genes increases? What distribution does this resemble? Why do you think this is?
 
 ```{r}
-# This needs to be edited to include only 100, the student can modify this value themselves and re-run the code.
-n_genes_values <- c(100, 1000, 10000)
+n_genes <- 100   # number of genes : change this value and re-run the chunk
 
-p_null <- lapply(n_genes_values, function(m) {
-  data.frame(n_genes = m, p = simulate_pvalues(delta = rep(0, m)))
-}) %>%
-  bind_rows()
+p_null <- simulate_pvalues(delta = rep(0, n_genes))
+prop_signif_null <- mean(p_null < 0.05)
 
-# Proportion of the genes declared significant (p-value below 0.05), for each number of genes
-prop_signif_null <- p_null %>%
-  group_by(n_genes) %>%
-  summarise(prop_signif = mean(p < 0.05))
-
-p_null <- p_null %>%
-  left_join(prop_signif_null, by = "n_genes") %>%
-  mutate(panel = sprintf("%s genes : %.1f%% below 0.05", format(n_genes, big.mark = ","), 100 * prop_signif)) %>%
-  mutate(panel = factor(panel, levels = unique(panel[order(n_genes)])))
-
-plot_null <- ggplot(p_null, aes(x = p)) +
+plot_null <- ggplot(data.frame(p = p_null), aes(x = p)) +
   geom_histogram(aes(y = after_stat(density)), breaks = seq(0, 1, 0.05), colour = "white") +
   geom_hline(yintercept = 1, linetype = "dashed") +
   geom_vline(xintercept = 0.05, colour = "red", linetype = "dashed") +
-  facet_wrap(~panel, nrow = 1) +
-  labs(x = "p-value", y = "Density", title = "p-values of genes with no true difference")
+  labs(x = "p-value", y = "Density",
+       title = sprintf("p-values of %s genes with no true difference", format(n_genes, big.mark = ",")),
+       subtitle = sprintf("%.1f%% of the genes have a p-value below 0.05", 100 * prop_signif_null))
 
-ggsave(here("output", "pvalues_no_signal.pdf"), plot_null, width = 12, height = 4)
+ggsave(here("output", "pvalues_no_signal.pdf"), plot_null, width = 8, height = 5)
 
 plot_null
 ```
 
 <!-- solution:text -->
-> **Answer:** With 100 genes, the histogram is irregular, because of chance : there are too few p-values to see a pattern. The more genes, the closer the histogram gets to a flat line (the dashed line). With a large number of genes, the histogram is flat : when there is no true difference, all p-values between 0 and 1 are equally likely (the p-values follow a uniform distribution). Here, you should talk about the cumulative density function of the uniform and why this produces the definition of a p-value...
+> **Answer:** With a small number of genes (100), the histogram is irregular : there are too few p-values to see a pattern, and the bars differ by chance. The more genes, the closer the histogram gets to a flat line (the dashed line) : it resembles a **uniform distribution** between 0 and 1. This is not a coincidence, it is how a p-value is defined. The p-value of a test is the probability, *if there is no true difference*, of observing a result at least as extreme as the one we observed. So, among many experiments with no true difference, 5% of them give a result among the 5% most extreme, which means that 5% have a p-value below 0.05, 10% have a p-value below 0.10, and so on : the proportion of p-values below any value x is exactly x. In other words, the cumulative distribution function of the p-values is F(x) = x, which is the cumulative distribution function of the uniform distribution on (0, 1). A distribution whose cumulative distribution function is a straight line has a flat density, hence the flat histogram.
 <!-- /solution -->
 
-> What proportion of the genes with no true difference are declared significant at the 5% level?
+> What proportion of the genes with no true difference are declared significant at the 5% level? How does this proportion change when you increase the number of genes?
 
 <!-- solution:text -->
-> **Answer:** As the number of genes increases, the percentage of genes significant at the 5% level approaches 5%.
+> **Answer:** With the `r format(n_genes, big.mark = ",")` genes of the chunk above, `r sprintf("%.1f", 100 * prop_signif_null)`% of the genes are declared significant. As the number of genes increases, this proportion gets closer and closer to 5%. Since the p-values are uniform, the probability that a p-value falls below 0.05 is exactly 0.05. This probability of declaring significant a gene that is not different is the **false positive rate** (FPR) of the test : by choosing a threshold of 0.05, we choose to accept a 5% false positive rate. It does not depend on the sample size or on the variability of the data.
 <!-- /solution -->
 
 ## 1b) Genes with a true difference
 
 > So, we just learned about the false positive rate, i.e. the proportion of true negatives that we declare positive after a statistical test. For a **valid** statistical test, the false positive rate is expected to match the **claimed** rate (i.e. the significance level of the test) exactly.
 
-> Now, what happens when the gene *is* truly differentially expressed? The below chunk simulates 10,000 genes with a small difference in expression ($\delta = 0.5$). Re-run the chunk using increasingly large values of $\delta$. What happens to the histogram of p-values? How does this differ from what we previously saw when $\delta = 0$, and why?
+> Now, what happens when the gene *is* truly differentially expressed? The below chunk simulates 10,000 genes with a small difference in expression ($\delta = 0.5$). **Try it** : re-run the chunk with increasingly large values of $\delta$ (for example 1, 2 and 3). What happens to the histogram of p-values? How does this differ from what we previously saw when $\delta = 0$, and why?
 
 ```{r}
-# This needs to be edited to start at 0.5 and get the student to change the value of data and qualitatively describe what happens to the histogram. 
-n_genes <- 10000   # number of genes simulated for each value of delta
-deltas <- c(0, 0.5, 1, 2, 3)
+n_genes <- 10000   # number of genes
+delta <- 0.5       # true difference of the genes : change this value and re-run the chunk
 
-p_by_delta <- lapply(deltas, function(d) {
-  data.frame(delta = paste("delta =", d), p = simulate_pvalues(rep(d, n_genes)))
-}) %>%
-  bind_rows() %>%
-  mutate(delta = factor(delta, levels = paste("delta =", deltas)))
+p_signal <- simulate_pvalues(rep(delta, n_genes))
+prop_signif_signal <- mean(p_signal < 0.05)
 
-plot_signal <- ggplot(p_by_delta, aes(x = p)) +
+plot_signal <- ggplot(data.frame(p = p_signal), aes(x = p)) +
   geom_histogram(breaks = seq(0, 1, 0.05), colour = "white") +
   geom_vline(xintercept = 0.05, colour = "red", linetype = "dashed") +
-  facet_wrap(~delta, nrow = 1) +
-  labs(x = "p-value", y = "Number of genes", title = "p-values of 10,000 genes, for different true differences")
+  labs(x = "p-value", y = "Number of genes",
+       title = sprintf("p-values of 10,000 genes with a true difference of delta = %s", delta),
+       subtitle = sprintf("%.1f%% of the genes have a p-value below 0.05", 100 * prop_signif_signal))
 
-ggsave(here("output", "pvalues_by_delta.pdf"), plot_signal, width = 12, height = 4)
+ggsave(here("output", "pvalues_signal.pdf"), plot_signal, width = 8, height = 5)
 
 plot_signal
 ```
 
-> Among the true positives, the proportion of genes declared significant (i.e. with a p-value below 0.05) is called the **power** of the test: the probability to detect a real difference. The following chunk computes it for a range of values of `delta`, with 10 and with 20 participants per group. What do you notice about the results of this experiment?
+<!-- solution:text -->
+> **Answer:** When `delta = 0.5`, the histogram is no longer flat : there are more small p-values than large ones. The larger `delta`, the more the p-values are concentrated near 0, and the more genes are below the red line (0.05). This differs from `delta = 0`, where all p-values were equally likely. Why? When there is a true difference, the observed difference between the groups tends to be large compared to the variability within the groups, which is unlikely if there was no true difference, and hence gives a small p-value. The larger the true difference, the more often this happens.
+<!-- /solution -->
+
+> Among the genes with a true difference, the proportion of genes declared significant (i.e. with a p-value below 0.05) is called the **power** of the test : the probability to detect a real difference. The following chunk computes it for a range of values of `delta`, with 10, 20 and 50 participants per group (to save time, with 2,000 genes for each value). What do you notice about the results of this experiment?
 
 ```{r}
+n_genes_power <- 2000   # number of genes simulated for each value of delta and of group size
+
 power_df <- expand.grid(delta = seq(0, 3, 0.25), n = c(10, 20, 50)) %>%
   rowwise() %>%
-  mutate(proportion_significant = mean(simulate_pvalues(rep(delta, n_genes), n = n) < 0.05)) %>%
+  mutate(proportion_significant = mean(simulate_pvalues(rep(delta, n_genes_power), n = n) < 0.05)) %>%
   ungroup() %>%
   mutate(n = factor(n, labels = c("10 per group", "20 per group", "50 per group")))
 
@@ -233,178 +224,198 @@ plot_power
 ```
 
 <!-- solution:text -->
-> **Answer:** As `delta` increases, the p-values are more and more concentrated near 0, and the proportion of genes declared significant increases : from about 5% for `delta = 0` to `r sprintf("%.0f", 100 * power_df$proportion_significant[power_df$delta == 1 & power_df$n == "10 per group"])`% for `delta = 1` and almost 100% for `delta = 3` (with 10 participants per group). The larger the true difference, the easier it is to detect. In addition, the more participants within each group, the faster this power rises with the size of the effect. This is because, given the same data generation, higher sample sizes result in a more precise estimate of the true effect, which is therefore more likely to be detected through testing (perhaps you can make this answer a bit clearer). 
+> **Answer:** There are two things to notice. (1) The power increases with the size of the true difference : from about 5% when `delta = 0` (where this proportion is the false positive rate) to `r sprintf("%.0f", 100 * power_df$proportion_significant[power_df$delta == 1 & power_df$n == "10 per group"])`% when `delta = 1`, and almost 100% when `delta = 3`, with 10 participants per group. The larger the difference, the easier it is to detect. (2) The power increases with the number of participants : for the same `delta`, the curve is higher with 50 participants per group than with 10 (for `delta = 1`, `r sprintf("%.0f", 100 * power_df$proportion_significant[power_df$delta == 1 & power_df$n == "50 per group"])`% against `r sprintf("%.0f", 100 * power_df$proportion_significant[power_df$delta == 1 & power_df$n == "10 per group"])`%), so a smaller difference is enough to be detected almost every time. This is because, with more participants, the mean of each group is estimated more precisely, so a given true difference stands out more clearly from the random variation, and the test is more likely to give a small p-value.
 <!-- /solution -->
 
 ## 1c) A mix of genes with and without a true difference
 
-> In an omics study, we test thousands of genes, and most of them are not differentially expressed. Let's simulate such a study : 10,000 genes, of which **100 are truly different** (with `delta = 3`, so the power is almost 100%) and 9,900 are not. We test all of them, and declare significant those with a p-value below 0.05. Since we know the truth, the following table counts our correct and wrong decisions.
+> In an omics study, we test thousands of genes, and most of them are not differentially expressed. We call the genes that are truly differentially expressed the **positives**, and the genes that are not the **negatives**. After testing, each gene is either declared significant or not. Comparing our decision with the truth, each gene falls into one of four categories :
+>
+> - **TP** (true positive) : a positive, declared significant;
+> - **FP** (false positive) : a negative, declared significant;
+> - **FN** (false negative) : a positive, not declared significant;
+> - **TN** (true negative) : a negative, not declared significant.
+
+> From these four numbers, we compute three rates :
+>
+> - the **false positive rate** (FPR) = FP / (FP + TN) : among the negatives, the proportion declared significant;
+> - the **power** = TP / (TP + FN) : among the positives, the proportion declared significant;
+> - the **false discovery proportion** (FDP) = FP / (FP + TP) : among the genes declared significant, the proportion which are negatives.
+
+> The following helper function counts TP, FP, FN and TN from our decisions (`significant`, `TRUE` if the gene is declared significant) and from the truth (`is_pos`, `TRUE` if the gene is a positive), and computes the three rates.
 
 ```{r}
-n_genes <- 10000        # total number of genes
-n_effect <- 100         # number of genes which are truly different
-delta_effect <- 3       # true difference of these genes
+evaluate_decision <- function(significant, is_pos) {
+  TP <- sum(significant & is_pos)
+  FP <- sum(significant & !is_pos)
+  FN <- sum(!significant & is_pos)
+  TN <- sum(!significant & !is_pos)
+
+  data.frame(
+    TP = TP, FP = FP, FN = FN, TN = TN,
+    power = TP / (TP + FN),
+    FPR = FP / (FP + TN),
+    FDP = ifelse(TP + FP == 0, 0, FP / (FP + TP))   # 0 if there is no discovery
+  )
+}
+```
+
+> Let's simulate a first small study : **100 positives** (with `delta = 3`, so the power is almost 100%) and **100 negatives**. We test all the genes, and declare significant those with a p-value below 0.05. The chunk prints the contingency table of the truth against our decisions, and the numbers and rates computed by the helper function.
+
+```{r}
+n_pos <- 100        # number of positives : genes which are truly different
+n_neg <- 100        # number of negatives : genes which are not different
+delta_pos <- 3      # true difference of the positives
 
 # The truth for each gene, and the true difference of each gene
-is_effect <- rep(c(TRUE, FALSE), c(n_effect, n_genes - n_effect))
-delta <- ifelse(is_effect, delta_effect, 0)
+is_pos <- rep(c(TRUE, FALSE), c(n_pos, n_neg))
+delta <- ifelse(is_pos, delta_pos, 0)
 
 # Simulate and test all the genes, and declare significant those with a p-value below 0.05
 p_mix <- simulate_pvalues(delta)
 significant <- p_mix < 0.05
 
-results_table <- table(
-  Truth = ifelse(is_effect, "Truly different", "Not different"),
-  Decision = ifelse(significant, "Declared significant", "Not significant")
+# Contingency table : the truth against our decision
+table(
+  Truth = factor(ifelse(is_pos, "Positive", "Negative"), levels = c("Positive", "Negative")),
+  Decision = factor(ifelse(significant, "Significant", "Not significant"), levels = c("Significant", "Not significant"))
 )
-results_table
 
-# The numbers of the table
-true_positives <- results_table["Truly different", "Declared significant"]
-false_positives <- results_table["Not different", "Declared significant"]
-false_negatives <- results_table["Truly different", "Not significant"]
-true_negatives <- results_table["Not different", "Not significant"]
+# The numbers TP, FP, FN, TN and the three rates
+results_mix <- evaluate_decision(significant, is_pos)
+results_mix
 ```
 
-> The following figure shows the p-values of the 10,000 genes, coloured according to the truth.
+> Read the table. What are the numbers TP, FP, FN and TN? What are the power, the false positive rate and the false discovery proportion?
+
+<!-- solution:text -->
+> **Answer:** TP = `r results_mix$TP`, FP = `r results_mix$FP`, FN = `r results_mix$FN` and TN = `r results_mix$TN`. The power is `r results_mix$TP` / (`r results_mix$TP` + `r results_mix$FN`) = `r sprintf("%.0f", 100 * results_mix$power)`%, the false positive rate is `r results_mix$FP` / (`r results_mix$FP` + `r results_mix$TN`) = `r sprintf("%.0f", 100 * results_mix$FPR)`%, and the false discovery proportion is `r results_mix$FP` / (`r results_mix$FP` + `r results_mix$TP`) = `r sprintf("%.0f", 100 * results_mix$FDP)`%.
+<!-- /solution -->
+
+> **Try it** : now increase the number of negatives (`n_neg`) to 1,000, and then to 10,000, keeping 100 positives, and re-run the chunk each time. What happens to the power, to the false positive rate and to the false discovery proportion?
+
+<!-- solution:text -->
+> **Answer:** The power (almost 100%) and the false positive rate (about 5%) do not change. The false discovery proportion increases a lot (from about 30% with 1,000 negatives to more than 80% with 10,000 negatives).
+<!-- /solution -->
+
+> How do you explain that the false discovery proportion increases, although the power and the false positive rate stay the same?
+
+<!-- solution:text -->
+> **Answer:** The false positive rate is a proportion *of the negatives* : 5% of them are declared significant, whatever their number. So the number of false positives is about 5% of the number of negatives, and it grows with it : with 10,000 negatives, about 500 of them are declared significant. The number of true positives, on the other hand, cannot exceed the 100 positives. The false discovery proportion, FP / (FP + TP), is therefore more and more dominated by the false positives. A 5% false positive rate guarantees that 5% of the negatives are wrongly declared significant, not that 5% of the discoveries are false : the two answer different questions, and **controlling the false positive rate does not control the false discovery proportion**.
+<!-- /solution -->
+
+> The following chunk repeats the simulation for an increasing number of negatives (always with 100 positives), and plots the three quantities as a function of the proportion of negatives among all the genes. To reduce the random variation, each setting is repeated 10 times and the results are averaged.
 
 ```{r}
-plot_mix <- ggplot(data.frame(p = p_mix, truth = ifelse(is_effect, "Truly different", "Not different")),
-                   aes(x = p, fill = truth)) +
-  geom_histogram(breaks = seq(0, 1, 0.05), colour = "white") +
-  geom_vline(xintercept = 0.05, colour = "red", linetype = "dashed") +
-  labs(x = "p-value", y = "Number of genes", fill = "Truth",
-       title = "p-values of 10,000 genes, 100 of which are truly different")
+n_neg_values <- c(100, 200, 500, 1000, 2000, 5000, 10000)
 
-ggsave(here("output", "pvalues_mix.pdf"), plot_mix, width = 8, height = 5)
+summary_1c <- lapply(n_neg_values, function(n_neg) {
+  is_pos <- rep(c(TRUE, FALSE), c(n_pos, n_neg))
+  delta <- ifelse(is_pos, delta_pos, 0)
 
-plot_mix
+  # Repeat the study 10 times, and average the three rates
+  lapply(1:10, function(repetition) evaluate_decision(simulate_pvalues(delta) < 0.05, is_pos)) %>%
+    bind_rows() %>%
+    summarise(across(c(power, FPR, FDP), mean)) %>%
+    mutate(prop_neg = n_neg / (n_pos + n_neg))
+}) %>%
+  bind_rows()
+
+plot_power_1c <- ggplot(summary_1c, aes(x = prop_neg, y = power)) +
+  geom_line() + geom_point() + ylim(0, 1) +
+  labs(x = "Proportion of negatives among all the genes", y = "Power", title = "Power")
+
+plot_fpr_1c <- ggplot(summary_1c, aes(x = prop_neg, y = FPR)) +
+  geom_line() + geom_point() + ylim(0, 1) +
+  labs(x = "Proportion of negatives among all the genes", y = "False positive rate", title = "False positive rate")
+
+plot_fdp_1c <- ggplot(summary_1c, aes(x = prop_neg, y = FDP)) +
+  geom_line() + geom_point() + ylim(0, 1) +
+  labs(x = "Proportion of negatives among all the genes", y = "False discovery proportion", title = "False discovery proportion")
+
+ggsave(here("output", "power_by_proportion_negatives.pdf"), plot_power_1c, width = 6, height = 4)
+ggsave(here("output", "fpr_by_proportion_negatives.pdf"), plot_fpr_1c, width = 6, height = 4)
+ggsave(here("output", "fdp_by_proportion_negatives.pdf"), plot_fdp_1c, width = 6, height = 4)
+
+plot_power_1c
+plot_fpr_1c
+plot_fdp_1c
 ```
 
-> How many of the truly different genes are found? How many false positives are there, and where do they come from?
+> Look at the three plots. What do they show? From which proportion of negatives are more than half of the discoveries false?
 
 <!-- solution:text -->
-> **Answer:** `r true_positives` of the 100 truly different genes are found (the power is `r sprintf("%.0f", 100 * true_positives / n_effect)`%). There are also `r false_positives` false positives : these are genes that are not different but have a p-value below 0.05 by chance. Since 5% of the 9,900 genes that are not different have a p-value below 0.05, we expect about 5% x 9,900 = 495 false positives.
+> **Answer:** The power and the false positive rate stay constant (at almost 100% and about 5%) whatever the proportion of negatives, whereas the false discovery proportion increases steadily towards 100% as the proportion of negatives increases. With 100 positives, more than half of the discoveries are false once there are more than about 2,000 negatives (a proportion of negatives above about 95%), since 5% of 2,000 is 100 false positives for about 100 true positives. On the grid used here, the false discovery proportion is above 50% from a proportion of negatives of `r sprintf("%.0f", 100 * min(summary_1c$prop_neg[summary_1c$FDP > 0.5]))`%. In omics studies, where most of the genes are not different, we can therefore expect a large part of the genes declared significant at the 5% level to be false discoveries.
 <!-- /solution -->
 
-> Among all the genes declared significant, what proportion is truly different? And what proportion is *not* different (this is called the **false discovery proportion**, FDP)? Why is it so high, although we use a 5% threshold for each test?
+## 1d) Correcting for multiple testing : Bonferroni and Benjamini-Hochberg
 
-<!-- solution:text -->
-> **Answer:** `r true_positives + false_positives` genes are declared significant, of which `r true_positives` are truly different (`r sprintf("%.0f", 100 * true_positives / (true_positives + false_positives))`%). The false discovery proportion is therefore `r false_positives` / `r true_positives + false_positives` = `r sprintf("%.0f", 100 * false_positives / (true_positives + false_positives))`%. The false positive rate is 5% (5% of the genes that are not different are declared significant), but this is a proportion of the 9,900 genes that are not different. There are so many of them that these 5% outnumber the 100 true discoveries. The 5% threshold does *not* mean that 5% of our discoveries are false.
-<!-- /solution -->
-
-> **Try it** : change the number of truly different genes to `n_effect <- 1000` in the chunk above (and re-run both chunks). What happens to the proportion of false discoveries among the genes declared significant? Why?
-
-<!-- solution:text -->
-> **Answer:** The proportion of false discoveries decreases (to about 5% x 9,000 / (1,000 + 450) = about 31%, instead of about 83%). The number of false positives is smaller (there are fewer genes that are not different), and above all they are now diluted among many more true discoveries. The proportion of false discoveries depends on the proportion of genes that are truly different, not only on the threshold.
-<!-- /solution -->
-
-## 1d) More and more genes without a true difference
-
-> Let's keep the same 100 truly different genes (with `delta = 3`), and the same threshold, but test more and more genes that are not different : 100, 1,000, 10,000 and 20,000. The number of true discoveries to be made is always 100, and the power is always almost 100%. To get reliable averages, each study is repeated 30 times (this takes one or two minutes to run). With only 30 repetitions, the averages are approximate : for example, a probability that should be 5% may come out at 3% or 10%.
-
-> We will compute the following quantities, averaged over the 30 repeated studies. Let V be the number of false positives, S the number of true positives, and R = V + S the number of genes declared significant (the discoveries) :
+> We have just seen that testing each gene at the 5% level does not control the proportion of false discoveries. Two classic corrections address this problem, and they control two different error rates, defined from the numbers of false positives (FP) and true positives (TP) :
 >
-> - the **false positive rate** (FPR) : the proportion of the genes that are not different which are declared significant, V / (number of genes that are not different).
-> - the **power** : the proportion of the truly different genes which are declared significant, S / 100.
-> - the **family-wise error rate** (FWER) : the probability of making *at least one* false positive in the study, P(V >= 1).
-> - the **false discovery rate** (FDR) : the average false discovery proportion, i.e. the average of V / R (taken to be 0 if R = 0), the proportion of the discoveries which are false.
+> - the **family-wise error rate** (FWER) : the probability of making *at least one* false positive, P(FP >= 1);
+> - the **false discovery rate** (FDR) : the *average* false discovery proportion, i.e. the average of FP / (FP + TP) over many repeated studies.
 
-> We compare three ways to decide which genes are significant. The first is to compare each p-value to 0.05 ("no correction"). The two others *correct* for the fact that many tests are performed. The **Bonferroni correction** declares a gene significant if its p-value is below 0.05 / m, where m is the number of tests. The **Benjamini-Hochberg (BH) correction** ranks the p-values from the smallest to the largest, and declares significant the genes with the smallest p-values up to the largest rank k such that the k-th smallest p-value is below (k / m) x 0.05. In R, both are available through the function `p.adjust()`. We will see in the second part how these procedures work in detail.
+> Note that these two error rates describe the behaviour of a procedure over many repeated studies. In a single study, we only observe the numbers FP and TP, and therefore the false discovery proportion of that study, and whether or not it contains at least one false positive.
 
-```{r}
-# Simulate the studies
-run_studies <- function(n_null, n_effect, delta_effect, n_studies = 30, alpha = 0.05) {
-  is_effect <- rep(c(FALSE, TRUE), c(n_null, n_effect))
-  delta <- ifelse(is_effect, delta_effect, 0)
-  methods <- c("none", "bonferroni", "BH")
-
-  results <- vector("list", n_studies * length(methods))
-  k <- 0
-  for (s in seq_len(n_studies)) {
-    p <- simulate_pvalues(delta)
-    for (method in methods) {
-      # Genes declared significant, with or without correction
-      significant <- p.adjust(p, method = method) <= alpha
-      k <- k + 1
-      results[[k]] <- data.frame(
-        method = method,
-        V = sum(significant & !is_effect),   # false positives
-        S = sum(significant & is_effect)     # true positives
-      )
-    }
-  }
-
-  bind_rows(results) %>%
-    group_by(method) %>%
-    summarise(
-      FPR = mean(V) / n_null,
-      power = mean(S) / n_effect,
-      FWER = mean(V >= 1),
-      FDR = mean(V / pmax(V + S, 1)),
-      .groups = "drop"
-    ) %>%
-    mutate(n_null = n_null)
-}
-
-n_effect <- 100
-n_null_values <- c(100, 1000, 10000, 20000)
-
-summary_1d <- lapply(n_null_values, run_studies, n_effect = n_effect, delta_effect = 3) %>%
-  bind_rows() %>%
-  mutate(method = factor(method, levels = c("none", "bonferroni", "BH"),
-                         labels = c("No correction", "Bonferroni", "Benjamini-Hochberg")))
-```
-
-> The following table and figure show the results. Each curve is a quantity, as a function of the number of genes that are not different.
+> We now simulate a study with **100 positives and 9,900 negatives** (10,000 genes), and look at what happens when we apply no correction (each p-value is compared to 0.05), the Bonferroni correction, and the Benjamini-Hochberg (BH) correction, one by one. Run the following chunk to simulate the p-values, and to look at the results with no correction.
 
 ```{r}
-# Table of the results
-summary_1d %>%
-  arrange(method, n_null) %>%
-  mutate(across(c(FPR, power, FWER, FDR), ~ round(.x, 3)))
+n_pos <- 100
+n_neg <- 9900
+delta_pos <- 3
 
-plot_1d <- summary_1d %>%
-  pivot_longer(c(FPR, power, FWER, FDR), names_to = "quantity", values_to = "value") %>%
-  mutate(quantity = factor(quantity, levels = c("FPR", "power", "FWER", "FDR"),
-                           labels = c("False positive rate", "Power", "Family-wise error rate (FWER)", "False discovery rate (FDR)"))) %>%
-  ggplot(aes(x = n_null, y = value, colour = method)) +
-  geom_line() +
-  geom_point() +
-  scale_x_log10() +
-  facet_wrap(~quantity, scales = "free_y") +
-  labs(x = "Number of genes which are not different (log scale)", y = NULL, colour = "Decision",
-       title = "100 truly different genes, and more and more genes which are not different")
+is_pos <- rep(c(TRUE, FALSE), c(n_pos, n_neg))
+p_1d <- simulate_pvalues(ifelse(is_pos, delta_pos, 0))
 
-ggsave(here("output", "errors_by_number_of_genes.pdf"), plot_1d, width = 10, height = 7)
-
-plot_1d
+# No correction : compare each p-value to 0.05
+results_none <- evaluate_decision(p_1d < 0.05, is_pos)
+results_none
 ```
 
-> **Try it** : in the chunk that runs the studies, change the number of truly different genes (`n_effect <- 100`) to 1,000, and re-run the chunks. What changes?
+> **The Bonferroni correction** controls the FWER. It declares significant the genes whose p-value is below 0.05 / m, where m is the number of tests (here 0.05 / 10,000 = 0.000005). This is the same as multiplying each p-value by m (a "Bonferroni-adjusted p-value") and comparing it to 0.05. In R, the adjusted p-values are given by `p.adjust()`.
 
-> Without correction, which of the four quantities stay constant and which change when the number of genes that are not different increases? Explain why.
+```{r}
+p_bonferroni <- p.adjust(p_1d, method = "bonferroni")
+
+results_bonferroni <- evaluate_decision(p_bonferroni < 0.05, is_pos)
+results_bonferroni
+```
+
+> Compared with no correction, what happens to FP, TP and FN? What have we gained and what have we lost?
 
 <!-- solution:text -->
-> **Answer:** Without correction, the false positive rate (always about 5%) and the power (almost 100%) are constant : they only depend on the threshold and on the effect size. But the number of false positives increases with the number of genes that are not different, so the probability of making at least one false positive (FWER) increases rapidly towards 100% (it is already about `r sprintf("%.0f", 100 * summary_1d$FWER[summary_1d$method == "No correction" & summary_1d$n_null == 100])`% with 100 genes that are not different), and the proportion of false discoveries (FDR) increases from `r sprintf("%.0f", 100 * summary_1d$FDR[summary_1d$method == "No correction" & summary_1d$n_null == 100])`% with 100 genes that are not different to `r sprintf("%.0f", 100 * summary_1d$FDR[summary_1d$method == "No correction" & summary_1d$n_null == 20000])`% with 20,000.
+> **Answer:** The number of false positives drops from FP = `r results_none$FP` to FP = `r results_bonferroni$FP` : Bonferroni removes (nearly) all the false positives, so the false discovery proportion goes from `r sprintf("%.0f", 100 * results_none$FDP)`% to `r sprintf("%.0f", 100 * results_bonferroni$FDP)`%. The price is that the number of true positives decreases from TP = `r results_none$TP` to TP = `r results_bonferroni$TP`, and the number of false negatives increases from FN = `r results_none$FN` to FN = `r results_bonferroni$FN` : the threshold is so strict that some genes which are truly different are missed. The power drops from `r sprintf("%.0f", 100 * results_none$power)`% to `r sprintf("%.0f", 100 * results_bonferroni$power)`%.
 <!-- /solution -->
 
-> The same test, with the same 5% threshold, gives very different results depending on the number of genes it is applied to. What does this tell us about what a 5% threshold for each test controls, and what it does not control?
+> **The Benjamini-Hochberg (BH) correction** controls the FDR. It ranks the p-values from the smallest to the largest, p(1) <= p(2) <= ... <= p(m). It finds the largest rank k such that p(k) <= (k / m) x 0.05, and declares significant the k genes with the smallest p-values. The threshold (k / m) x 0.05 increases with the rank, so for the first genes it is as strict as Bonferroni, but it becomes much more permissive as more discoveries are made.
+
+```{r}
+p_bh <- p.adjust(p_1d, method = "BH")
+
+results_bh <- evaluate_decision(p_bh < 0.05, is_pos)
+results_bh
+```
+
+> Compared with the Bonferroni correction, what happens to FP, TP and FN, and to the false discovery proportion?
 
 <!-- solution:text -->
-> **Answer:** A 5% threshold for each test only controls the false positive rate : the proportion of the genes that are not different which are declared significant. It does not control the probability of making at least one false positive (FWER), nor the proportion of false discoveries among the discoveries (FDR), which both depend on the number of tests performed and on how many of the genes are truly different. Controlling the false positive rate is not the same as controlling the FWER or the FDR.
+> **Answer:** The BH correction finds many more true positives than Bonferroni (TP = `r results_bh$TP` against `r results_bonferroni$TP`) and misses fewer (FN = `r results_bh$FN` against `r results_bonferroni$FN`), at the price of a few false positives (FP = `r results_bh$FP`, against `r results_bonferroni$FP` for Bonferroni). Its false discovery proportion is `r sprintf("%.0f", 100 * results_bh$FDP)`%, around the 5% that the method controls on average, and much lower than with no correction (`r sprintf("%.0f", 100 * results_none$FDP)`%).
 <!-- /solution -->
 
-> What does the Bonferroni correction control? What do you pay for it, and how does this change when the number of genes increases?
+> Here are the three results side by side.
+
+```{r}
+bind_rows(
+  list("No correction" = results_none, "Bonferroni" = results_bonferroni, "Benjamini-Hochberg" = results_bh),
+  .id = "method"
+) %>%
+  mutate(across(c(power, FPR, FDP), ~ round(.x, 3)))
+```
+
+> **Try it** : re-run the chunks of this section several times. Each time, new data are simulated, so each run is a new study. How many false positives does Bonferroni give? Is the false discovery proportion of the BH correction always below 5%?
 
 <!-- solution:text -->
-> **Answer:** The Bonferroni correction controls the FWER : whatever the number of genes, the probability of making at least one false positive stays at about 5% or below. The false discovery rate is also very low. The price is the power : the threshold 0.05 / m becomes more and more strict when the number of tests increases, and the power decreases from `r sprintf("%.0f", 100 * summary_1d$power[summary_1d$method == "Bonferroni" & summary_1d$n_null == 100])`% with 100 genes that are not different to `r sprintf("%.0f", 100 * summary_1d$power[summary_1d$method == "Bonferroni" & summary_1d$n_null == 20000])`% with 20,000, so more and more of the real differences are missed.
-<!-- /solution -->
-
-> What does the Benjamini-Hochberg correction control? How does it compare with Bonferroni, in particular in terms of the power?
-
-<!-- solution:text -->
-> **Answer:** The Benjamini-Hochberg correction controls the FDR : the average proportion of false discoveries stays at about 5% or below, whatever the number of genes. It does not control the FWER (the probability of making at least one false positive can be much higher than 5%, as the discoveries are allowed to contain some false positives). In exchange, its power is much higher than that of Bonferroni (`r sprintf("%.0f", 100 * summary_1d$power[summary_1d$method == "Benjamini-Hochberg" & summary_1d$n_null == 20000])`% against `r sprintf("%.0f", 100 * summary_1d$power[summary_1d$method == "Bonferroni" & summary_1d$n_null == 20000])`% with 20,000 genes that are not different), as it accepts to make a few errors among the discoveries.
+> **Answer:** Bonferroni almost always gives FP = 0 : the probability of making at least one false positive (the FWER) is at most 5%. With no correction, there are always hundreds of false positives. The false discovery proportion of BH varies from one study to the next, around 5% : in some studies it is above 5%, and in others below. This is not a contradiction, as the FDR is the *average* false discovery proportion over many studies, which is what BH keeps at (or below) 5%.
 <!-- /solution -->
 
 > Which correction would you choose in each of the following situations ? (a) A confirmatory study, in which the few genes found significant will be used to take a clinical decision. (b) An exploratory study of 20,000 genes, to find candidate genes to be followed up in other experiments.
