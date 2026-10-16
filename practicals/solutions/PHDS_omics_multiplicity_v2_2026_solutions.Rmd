@@ -456,3 +456,136 @@ results_dge <- topTable(fit, coef = 2, n = Inf)
 
 head(results_dge)
 ```
+
+## 2b) The p-values
+
+> Let's look at the raw p-values of all the genes. The following chunk plots their histogram (the red line marks 0.05), and gives the number of genes tested, the number of genes with a raw p-value below 0.05, and the number of such genes that we would expect by chance if no gene were differentially expressed.
+
+```{r}
+n_tested <- nrow(results_dge)
+n_raw <- sum(results_dge$P.Value < 0.05)
+
+plot_pvalues_dge <- ggplot(results_dge, aes(x = P.Value)) +
+  geom_histogram(breaks = seq(0, 1, 0.05), colour = "white") +
+  geom_vline(xintercept = 0.05, colour = "red", linetype = "dashed") +
+  labs(x = "p-value", y = "Number of genes", title = "Raw p-values of the differential expression analysis")
+
+ggsave(here("output", "pvalues_dge.pdf"), plot_pvalues_dge, width = 8, height = 5)
+
+plot_pvalues_dge
+
+c(
+  "genes tested" = n_tested,
+  "p-value below 0.05" = n_raw,
+  "expected by chance if no gene was different" = 0.05 * n_tested
+)
+```
+
+> Compare this histogram with those of the simulations of the first part. What do you notice? What do the flat part of the histogram and the peak near 0 represent?
+
+<!-- solution:text -->
+> **Answer:** The histogram looks like the mix of genes with and without a true difference that we simulated in the first part : there is a peak of small p-values, which comes from the genes that are truly differentially expressed (like the positives), on top of a flat part, which comes from the genes that are not differentially expressed (like the negatives, whose p-values are uniform).
+<!-- /solution -->
+
+> `r "​"`How many genes have a raw p-value below 0.05? How many would we expect if none of the genes was differentially expressed? Looking at the flat part of the histogram (hint : the p-values above 0.5 come almost only from the genes that are not different), what proportion of the genes seems not to be differentially expressed? Using what you learned in 1c, what proportion of the genes declared significant at the 5% level (without correction) could be false positives?
+
+<!-- solution:text -->
+> **Answer:** `r n_raw` of the `r n_tested` genes have a raw p-value below 0.05, while we would only expect `r round(0.05 * n_tested)` if no gene was different. The p-values above 0.5 are almost all from genes that are not different, and they make up `r sprintf("%.0f", 100 * mean(results_dge$P.Value > 0.5))`% of the p-values, which covers half of the interval from 0 to 1. So the genes that are not different are about 2 x `r sprintf("%.0f", 100 * mean(results_dge$P.Value > 0.5))`% = `r sprintf("%.0f", 100 * min(1, 2 * mean(results_dge$P.Value > 0.5)))`% of all the genes. Among them, 5% have a p-value below 0.05, i.e. about `r round(0.05 * min(1, 2 * mean(results_dge$P.Value > 0.5)) * n_tested)` genes, so around `r sprintf("%.0f", 100 * 0.05 * min(1, 2 * mean(results_dge$P.Value > 0.5)) * n_tested / n_raw)`% of the `r n_raw` genes declared significant at the 5% level without correction may be false positives. This is the same phenomenon as in 1c : a large number of genes that are not different produces many false positives, even with a 5% threshold for each test.
+<!-- /solution -->
+
+## 2c) Correcting the p-values
+
+> Now apply the corrections. Using the function `p.adjust()`, compute the adjusted p-values of the genes with the Bonferroni, Holm, Benjamini-Hochberg (`method = "BH"`) and Benjamini-Yekutieli (`method = "BY"`) corrections, and store them in new columns of `results_dge`. For each correction, count the number of genes declared significant at the 5% level (adjusted p-value below 0.05), and compare it with the number of genes without correction (raw p-value below 0.05).
+
+<!-- solution:code -->
+```{r}
+results_dge <- results_dge %>%
+  mutate(
+    p_bonferroni = p.adjust(P.Value, method = "bonferroni"),
+    p_holm = p.adjust(P.Value, method = "holm"),
+    p_bh = p.adjust(P.Value, method = "BH"),
+    p_by = p.adjust(P.Value, method = "BY")
+  )
+
+n_discoveries <- c(
+  "No correction" = sum(results_dge$P.Value < 0.05),
+  "Bonferroni" = sum(results_dge$p_bonferroni < 0.05),
+  "Holm" = sum(results_dge$p_holm < 0.05),
+  "Benjamini-Hochberg" = sum(results_dge$p_bh < 0.05),
+  "Benjamini-Yekutieli" = sum(results_dge$p_by < 0.05)
+)
+n_discoveries
+```
+<!-- /solution -->
+
+> Which corrections are the strictest and which are the most permissive? How do you explain the differences between Bonferroni and Holm, and between BH and BY? Among the genes declared significant with the BH correction, about how many do you expect to be false positives?
+
+<!-- solution:text -->
+> **Answer:** Without correction, `r n_discoveries["No correction"]` genes are declared significant, and the corrections reduce this number. The strictest are the two corrections that control the FWER, Bonferroni (`r n_discoveries["Bonferroni"]` genes) and Holm (`r n_discoveries["Holm"]` genes), which give very similar results (Holm is never stricter than Bonferroni, and slightly less strict). The corrections that control the FDR declare many more genes significant : Benjamini-Hochberg (`r n_discoveries["Benjamini-Hochberg"]` genes) and Benjamini-Yekutieli (`r n_discoveries["Benjamini-Yekutieli"]` genes). BY is more conservative than BH, because it is valid whatever the dependence between the tests (genes are often correlated) and divides the BH threshold by a factor c(m) = 1 + 1/2 + ... + 1/m, about `r round(sum(1 / seq_len(n_tested)), 1)` here. With the BH correction, the FDR is controlled at 5%, so among the `r n_discoveries["Benjamini-Hochberg"]` genes declared significant, we expect, on average, at most 5%, i.e. about `r round(0.05 * n_discoveries["Benjamini-Hochberg"])` false positives. In contrast, we expect several hundreds of false positives without correction (see 2b).
+<!-- /solution -->
+
+## 2d) How do the corrections work?
+
+> Each correction compares the sorted p-values $p_{(1)} \le p_{(2)} \le \dots \le p_{(m)}$ (where $m$ is the number of genes tested, and $i$ is the rank of a p-value) to a threshold that depends on the rank $i$ and on the significance level $\alpha = 0.05$ :
+>
+> - Bonferroni : $p_{(i)} \le \dfrac{\alpha}{m}$
+> - Holm : $p_{(i)} \le \dfrac{\alpha}{m - i + 1}$
+> - Benjamini-Hochberg : $p_{(i)} \le \dfrac{i}{m}\,\alpha$
+> - Benjamini-Yekutieli : $p_{(i)} \le \dfrac{i}{m}\,\dfrac{\alpha}{c(m)}$, with $c(m) = \sum_{j=1}^{m} \dfrac{1}{j}$
+
+> The following chunk plots the sorted p-values against their rank (black points), on a log scale. The coloured lines are the thresholds of the four corrections. The dashed vertical lines show the number of genes declared significant by each correction : each correction declares significant all the genes up to a given rank. (We only show the first ranks.)
+
+```{r}
+alpha <- 0.05
+rank <- seq_len(n_tested)
+
+# The sorted p-values
+pvalues_sorted <- data.frame(rank = rank, p = sort(results_dge$P.Value))
+
+# The thresholds of the four corrections, for each rank
+c_m <- sum(1 / rank)
+
+thresholds <- data.frame(
+  rank = rank,
+  "Bonferroni" = alpha / n_tested,
+  "Holm" = alpha / (n_tested - rank + 1),
+  "Benjamini-Hochberg" = rank / n_tested * alpha,
+  "Benjamini-Yekutieli" = rank / n_tested * alpha / c_m,
+  check.names = FALSE
+) %>%
+  pivot_longer(-rank, names_to = "correction", values_to = "threshold")
+
+# The number of genes declared significant by each correction
+n_rejected <- data.frame(
+  correction = c("Bonferroni", "Holm", "Benjamini-Hochberg", "Benjamini-Yekutieli"),
+  n = c(sum(p.adjust(results_dge$P.Value, "bonferroni") < alpha),
+        sum(p.adjust(results_dge$P.Value, "holm") < alpha),
+        sum(p.adjust(results_dge$P.Value, "BH") < alpha),
+        sum(p.adjust(results_dge$P.Value, "BY") < alpha))
+)
+
+plot_thresholds <- ggplot() +
+  geom_point(data = pvalues_sorted, aes(x = rank, y = p), size = 0.5) +
+  geom_line(data = thresholds, aes(x = rank, y = threshold, colour = correction), linewidth = 0.8) +
+  geom_vline(data = n_rejected, aes(xintercept = n, colour = correction), linetype = "dashed") +
+  scale_y_log10() +
+  coord_cartesian(xlim = c(0, 1.5 * max(n_rejected$n, 100)), ylim = c(1e-8, 1)) +
+  labs(x = "Rank of the p-value", y = "p-value (log scale)", colour = "Correction",
+       title = "Sorted p-values and thresholds of the corrections")
+
+ggsave(here("output", "pvalues_thresholds.pdf"), plot_thresholds, width = 9, height = 6)
+
+plot_thresholds
+```
+
+> Describe how the threshold changes with the rank for each correction. Which is the strictest for the first ranks? Which correction declares significant the most genes?
+
+<!-- solution:text -->
+> **Answer:** The Bonferroni threshold is the same for all ranks (a flat line, $\alpha / m$). The Holm threshold starts at the same value, and increases with the rank, slowly at first and then very quickly for the last ranks. The Benjamini-Hochberg and Benjamini-Yekutieli thresholds increase linearly with the rank (straight lines), BY being lower than BH by a factor $c(m)$. For the first ranks, the strictest are Bonferroni and Holm for the first rank, and BY (a threshold of $\alpha / (m\,c(m))$ for the first rank, below the Bonferroni threshold). As the rank increases, the BH threshold becomes much higher than the Bonferroni and Holm thresholds, so BH declares significant the most genes (`r n_rejected$n[n_rejected$correction == "Benjamini-Hochberg"]` genes).
+<!-- /solution -->
+
+> For the Benjamini-Hochberg correction, look at the number of genes declared significant (the dashed vertical line) and at where the sorted p-values cross the threshold line. Are all the p-values of the genes declared significant below the line? How do you explain this?
+
+<!-- solution:text -->
+> **Answer:** The Benjamini-Hochberg correction is a *step-up* procedure : it looks for the **largest rank $k$** such that the p-value $p_{(k)}$ is below its threshold $\frac{k}{m}\alpha$, and then declares significant **all** the genes of rank $1, \dots, k$, even if some of their p-values are above the line at their own rank. The dashed vertical line therefore marks the last rank where the p-values are below the threshold line (here, $k$ = `r n_rejected$n[n_rejected$correction == "Benjamini-Hochberg"]`), and not the first rank at which a p-value is above it.
+<!-- /solution -->
