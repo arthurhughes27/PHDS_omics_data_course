@@ -5,9 +5,11 @@ editor_options:
 ---
 # Task overview
 
-> In omics studies, we do not test one hypothesis, we test thousands : is each of the 20,000 genes differentially expressed between patients and controls? Each test comes with a risk of error, and these risks add up. In this practical, we are going to study what happens to the errors we make when we perform many tests at once, and we will see why we need to *correct for multiple testing*.
+> In science, we collect data and use this data to assess the evidence for or against a null hypothesis. In the context of omics studies, we do not test one hypothesis, but thousands of simultaneous hypotheses. For example, in differential gene expression analysis, we test each gene for differential expression between treated and controls. Each individual test comes with a risk of making a false conclusion based on the data, and these risks add up as more tests are performed. In this practical, we will demonstrate the problems associated with **test multiplicity**, and show how we can correct for this.
 
-> In the first part, you will see a **demonstration with simulated data**. Because we generate the data ourselves, we know which genes are truly different, which is never the case with real data. This lets us count exactly the errors that we make. All the code is given : you run the chunks, look at the figures, and answer the questions. In a few places, marked **Try it**, you are asked to change a number and re-run a chunk.
+> In the first part, you will see a **demonstration with simulated data**. Because we generate the data ourselves, we know which variables are true positives (i.e. for which the exposure has a true effect between treated and control). This is useful, as it allows us to examine the rates at which we make errors. In this part, the code will mainly be given, and you will asked to interpret some of the results.
+
+> In the second part, you will perform a basic differential gene expression analysis on real data, following the example from a previous practical called `PHDS_omics_GMA_2026_solutions.Rmd`. We will use this example to show the difference between the results when using different choices of multiplicity correction. 
 
 # Setup
 
@@ -104,24 +106,24 @@ set.seed(123)
 here()
 ```
 
-# 1) Demonstration : errors when testing many genes
+# 1) Demonstration on simulated data
 
-## 1a) One gene with no signal
+## 1a) One gene with no true signal
 
-> Our setting is the following. We measure the expression of a gene in 10 controls and in 10 patients, and we want to know whether the gene is **differentially expressed** : is its average expression different between patients and controls? We answer with a two-sample t-test, which gives a **p-value**. We call the gene "significant" if its p-value is below 0.05.
+> Our setting is the following. We measure the expression of a gene in 10 controls and in 10 treated, and we want to know whether the gene is **differentially expressed** : is its average expression different between treated and controls? One basic way to answer this could be with a two-sample t-test, which gives a **p-value**. Conventionally, we call the gene "significant" if its p-value is below 0.05.
 
-> Since we generate the data, we choose the truth. We draw the expression of the controls from a normal distribution with mean 0 and standard deviation 1, and that of the patients from a normal distribution with mean `delta` and standard deviation 1. The number `delta` is the **true difference** in mean expression between patients and controls, in standard deviations. If `delta = 0`, the gene is truly not different. Run the following chunk : it simulates one gene with no true difference.
+> Since we generate the data, we choose whether there is a true difference between the generation of this gene between treated and controls. In this first example, we draw the expression of the controls from a normal distribution with mean 0 and standard deviation 1, and that of the treated from a normal distribution with mean `delta` and standard deviation 1. The number `delta` is the **true difference** in mean expression between treated and controls, in standard deviations. If `delta = 0`, the gene is truly not differentially expressed. Run the following chunk : it simulates one gene with no true difference.
 
 ```{r}
-n <- 10      # number of controls, and number of patients
-delta <- 0   # true difference between patients and controls : 0 means that the gene is not different
+n <- 10      # number of controls, and number of treated
+delta <- 0   # true difference between treated and controls : 0 means that the gene is not different
 
 control <- rnorm(n, mean = 0, sd = 1)       # expression of the gene in the 10 controls
-patient <- rnorm(n, mean = delta, sd = 1)   # expression of the gene in the 10 patients
+treated <- rnorm(n, mean = delta, sd = 1)   # expression of the gene in the 10 treated
 
 # Mean expression in each group, and p-value of the t-test
-c(control = mean(control), patient = mean(patient))
-t.test(control, patient, var.equal = TRUE)$p.value
+c(control = mean(control), treated = mean(treated))
+t.test(control, treated, var.equal = TRUE)$p.value
 ```
 
 > **Try it** : run the chunk several times. The data are drawn at random, so the p-value changes every time, although the gene is never truly different.
@@ -130,27 +132,18 @@ t.test(control, patient, var.equal = TRUE)$p.value
 
 ```{r}
 # p-values of the two-sample t-tests (equal variances), computed for many genes at once
-# controls, patients : matrices with one row per gene and one column per participant
-ttest_pvalues <- function(controls, patients) {
-  n <- ncol(controls)
-  mean_diff <- rowMeans(patients) - rowMeans(controls)
-  pooled_var <- (rowSums((controls - rowMeans(controls)) ^ 2) +
-                   rowSums((patients - rowMeans(patients)) ^ 2)) / (2 * n - 2)
-  t_stat <- mean_diff / sqrt(pooled_var * 2 / n)
-  2 * pt(-abs(t_stat), df = 2 * n - 2)
+# controls, treated : matrices with one row per gene and one column per participant
+ttest_pvalues <- function(controls, treated) {
+  t.test(controls, treated, var.equal = TRUE)$p.value
 }
 
 # Simulate one gene per element of delta (the true difference of the gene), and test each gene
 simulate_pvalues <- function(delta, n = 10) {
   m <- length(delta)
   controls <- matrix(rnorm(m * n, mean = 0, sd = 1), nrow = m)
-  patients <- matrix(rnorm(m * n, mean = delta, sd = 1), nrow = m)
-  ttest_pvalues(controls, patients)
+  treated <- matrix(rnorm(m * n, mean = delta, sd = 1), nrow = m)
+  ttest_pvalues(controls, treated)
 }
-
-# Check : the same p-value as t.test() for the gene simulated above
-c(t.test = t.test(control, patient, var.equal = TRUE)$p.value,
-  ttest_pvalues = ttest_pvalues(matrix(control, nrow = 1), matrix(patient, nrow = 1)))
 ```
 
 > Let's now simulate 10,000 genes, none of which is truly different (`delta = 0`), and look at their p-values. The red line marks 0.05.
