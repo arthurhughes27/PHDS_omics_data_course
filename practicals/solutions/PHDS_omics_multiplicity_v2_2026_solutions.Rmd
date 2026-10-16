@@ -128,54 +128,60 @@ t.test(control, treated, var.equal = TRUE)$p.value
 
 > **Try it** : run the chunk several times. The data are drawn at random, so the p-value changes every time, although the gene is never truly different.
 
-> To study what happens in general, we need to repeat the experiment many times. The following chunk defines a function that does this quickly : `simulate_pvalues()` simulates many genes at once (one per element of `delta`) and returns the p-value of the t-test of each. You do not need to read the details, but the first lines are exactly the model above, and the t-test is the same as `t.test()`: the check at the end compares them on the gene simulated above.
+> To study what happens in general, we need to repeat the experiment many times. The following chunk defines a function, `simulate_pvalues()`, which repeats exactly the experiment above for many genes : for each element of `delta` (the true difference of one gene), it draws the expression of the controls and of the treated, runs the t-test, and returns the p-value. The result is a vector with one p-value per gene.
 
 ```{r}
-# p-values of the two-sample t-tests (equal variances), computed for many genes at once
-# controls, treated : matrices with one row per gene and one column per participant
-ttest_pvalues <- function(controls, treated) {
-  t.test(controls, treated, var.equal = TRUE)$p.value
-}
-
-# Simulate one gene per element of delta (the true difference of the gene), and test each gene
 simulate_pvalues <- function(delta, n = 10) {
-  m <- length(delta)
-  controls <- matrix(rnorm(m * n, mean = 0, sd = 1), nrow = m)
-  treated <- matrix(rnorm(m * n, mean = delta, sd = 1), nrow = m)
-  ttest_pvalues(controls, treated)
+  sapply(delta, function(d) {
+    control <- rnorm(n, mean = 0, sd = 1)
+    treated <- rnorm(n, mean = d, sd = 1)
+    t.test(control, treated, var.equal = TRUE)$p.value
+  })
 }
 ```
 
-> Let's now simulate 10,000 genes, none of which is truly different (`delta = 0`), and look at their p-values. The red line marks 0.05.
+> Let's now simulate genes none of which is truly different (`delta = 0`), and look at their p-values. We do it for 100, 1,000 and 10,000 genes. In the figures, the red line marks 0.05, and the dashed line shows what a perfectly flat (uniform) distribution would look like.
 
 ```{r}
-n_genes <- 10000
+n_genes_values <- c(100, 1000, 10000)
 
-p_null <- simulate_pvalues(delta = rep(0, n_genes))
-prop_null_signif <- mean(p_null < 0.05)
+p_null <- lapply(n_genes_values, function(m) {
+  data.frame(n_genes = m, p = simulate_pvalues(delta = rep(0, m)))
+}) %>%
+  bind_rows()
 
-plot_null <- ggplot(data.frame(p = p_null), aes(x = p)) +
-  geom_histogram(breaks = seq(0, 1, 0.05), colour = "white") +
+# Proportion of the genes declared significant (p-value below 0.05), for each number of genes
+prop_signif_null <- p_null %>%
+  group_by(n_genes) %>%
+  summarise(prop_signif = mean(p < 0.05))
+
+p_null <- p_null %>%
+  left_join(prop_signif_null, by = "n_genes") %>%
+  mutate(panel = sprintf("%s genes : %.1f%% below 0.05", format(n_genes, big.mark = ","), 100 * prop_signif)) %>%
+  mutate(panel = factor(panel, levels = unique(panel[order(n_genes)])))
+
+plot_null <- ggplot(p_null, aes(x = p)) +
+  geom_histogram(aes(y = after_stat(density)), breaks = seq(0, 1, 0.05), colour = "white") +
+  geom_hline(yintercept = 1, linetype = "dashed") +
   geom_vline(xintercept = 0.05, colour = "red", linetype = "dashed") +
-  labs(x = "p-value", y = "Number of genes",
-       title = "p-values of 10,000 genes with no true difference",
-       subtitle = sprintf("%.1f%% of the genes have a p-value below 0.05", 100 * prop_null_signif))
+  facet_wrap(~panel, nrow = 1) +
+  labs(x = "p-value", y = "Density", title = "p-values of genes with no true difference")
 
-ggsave(here("output", "pvalues_no_signal.pdf"), plot_null, width = 8, height = 5)
+ggsave(here("output", "pvalues_no_signal.pdf"), plot_null, width = 12, height = 4)
 
 plot_null
 ```
 
-> What does the shape of the histogram tell you about the p-values of genes that are not different?
+> What happens to the shape of the histogram when the number of genes increases? What does the histogram look like for a large number of genes that are not different, and what does it tell you about their p-values?
 
 <!-- solution:text -->
-> **Answer:** The histogram is flat : when there is no true difference, all p-values between 0 and 1 are equally likely (the p-values follow a uniform distribution). This is what a p-value is designed to be.
+> **Answer:** With 100 genes, the histogram is irregular, because of chance : there are too few p-values to see a pattern. The more genes, the closer the histogram gets to a flat line (the dashed line). With a large number of genes, the histogram is flat : when there is no true difference, all p-values between 0 and 1 are equally likely (the p-values follow a uniform distribution). This is what a p-value is designed to be.
 <!-- /solution -->
 
-> What proportion of the genes with no true difference are declared significant? Why this number?
+> What proportion of the genes with no true difference are declared significant? Why this number? How does it depend on the number of genes?
 
 <!-- solution:text -->
-> **Answer:** `r sprintf("%.1f", 100 * prop_null_signif)`% of the genes are declared significant, i.e. about 5%. Since the p-values are uniform, the probability that a p-value falls below 0.05 is exactly 0.05. This probability of declaring significant a gene that is not different is the **false positive rate** (FPR) of the test : by choosing a threshold of 0.05, we choose to accept a 5% false positive rate. It does not depend on the sample size or on the variability of the data.
+> **Answer:** `r sprintf("%.1f", 100 * prop_signif_null$prop_signif[3])`% of the 10,000 genes are declared significant, i.e. about 5% (`r sprintf("%.1f", 100 * prop_signif_null$prop_signif[1])`% with 100 genes, `r sprintf("%.1f", 100 * prop_signif_null$prop_signif[2])`% with 1,000 : the more genes, the closer to 5%). Since the p-values are uniform, the probability that a p-value falls below 0.05 is exactly 0.05. This probability of declaring significant a gene that is not different is the **false positive rate** (FPR) of the test : by choosing a threshold of 0.05, we choose to accept a 5% false positive rate. It does not depend on the sample size or on the variability of the data.
 <!-- /solution -->
 
 ## 1b) Genes with a true difference
@@ -183,6 +189,7 @@ plot_null
 > What happens when the gene *is* truly different? Let's simulate 10,000 genes for several values of `delta`, from 0 (no difference) to 3 (a difference of 3 standard deviations between the groups), and look at the p-values.
 
 ```{r}
+n_genes <- 10000   # number of genes simulated for each value of delta
 deltas <- c(0, 0.5, 1, 2, 3)
 
 p_by_delta <- lapply(deltas, function(d) {
@@ -300,9 +307,9 @@ plot_mix
 
 ## 1d) More and more genes without a true difference
 
-> Let's keep the same 100 truly different genes (with `delta = 3`), and the same threshold, but test more and more genes that are not different : 100, 1,000, 10,000 and 20,000. The number of true discoveries to be made is always 100, and the power is always almost 100%. To get reliable averages, each study is repeated 200 times.
+> Let's keep the same 100 truly different genes (with `delta = 3`), and the same threshold, but test more and more genes that are not different : 100, 1,000, 10,000 and 20,000. The number of true discoveries to be made is always 100, and the power is always almost 100%. To get reliable averages, each study is repeated 30 times (this takes one or two minutes to run). With only 30 repetitions, the averages are approximate : for example, a probability that should be 5% may come out at 3% or 10%.
 
-> We will compute the following quantities, averaged over the 200 repeated studies. Let V be the number of false positives, S the number of true positives, and R = V + S the number of genes declared significant (the discoveries) :
+> We will compute the following quantities, averaged over the 30 repeated studies. Let V be the number of false positives, S the number of true positives, and R = V + S the number of genes declared significant (the discoveries) :
 >
 > - the **false positive rate** (FPR) : the proportion of the genes that are not different which are declared significant, V / (number of genes that are not different).
 > - the **power** : the proportion of the truly different genes which are declared significant, S / 100.
@@ -312,8 +319,8 @@ plot_mix
 > We compare three ways to decide which genes are significant. The first is to compare each p-value to 0.05 ("no correction"). The two others *correct* for the fact that many tests are performed. The **Bonferroni correction** declares a gene significant if its p-value is below 0.05 / m, where m is the number of tests. The **Benjamini-Hochberg (BH) correction** ranks the p-values from the smallest to the largest, and declares significant the genes with the smallest p-values up to the largest rank k such that the k-th smallest p-value is below (k / m) x 0.05. In R, both are available through the function `p.adjust()`. We will see in the second part how these procedures work in detail.
 
 ```{r}
-# Simulate the studies (this takes a few seconds)
-run_studies <- function(n_null, n_effect, delta_effect, n_studies = 200, alpha = 0.05) {
+# Simulate the studies
+run_studies <- function(n_null, n_effect, delta_effect, n_studies = 30, alpha = 0.05) {
   is_effect <- rep(c(FALSE, TRUE), c(n_null, n_effect))
   delta <- ifelse(is_effect, delta_effect, 0)
   methods <- c("none", "bonferroni", "BH")
