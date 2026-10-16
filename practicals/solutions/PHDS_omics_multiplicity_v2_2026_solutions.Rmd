@@ -126,7 +126,7 @@ c(control = mean(control), treated = mean(treated))
 t.test(control, treated, var.equal = TRUE)$p.value
 ```
 
-> **Try it** : run the chunk several times. The data are drawn at random, so the p-value changes every time, although the gene is never truly different.
+> **Try it** : run the chunk several times. The data are drawn at random, so the p-value will change in value every time, although the gene is never truly different. This is due to **sampling variability**.
 
 > To study what happens in general, we need to repeat the experiment many times. The following chunk defines a function, `simulate_pvalues()`, which repeats exactly the experiment above for many genes : for each element of `delta` (the true difference of one gene), it draws the expression of the controls and of the treated, runs the t-test, and returns the p-value. The result is a vector with one p-value per gene.
 
@@ -140,9 +140,10 @@ simulate_pvalues <- function(delta, n = 10) {
 }
 ```
 
-> Let's now simulate genes none of which is truly different (`delta = 0`), and look at their p-values. We do it for 100, 1,000 and 10,000 genes. In the figures, the red line marks 0.05, and the dashed line shows what a perfectly flat (uniform) distribution would look like.
+> Let's now simulate 100 genes none of which is truly different (`delta = 0` for all genes), and look at their p-values. Now try increasing the number of genes (for example, to 1000, 10,000, or 100,000). What happens to the shape of the histogram when the number of genes increases? What distribution does this resemble? Why do you think this is?
 
 ```{r}
+# This needs to be edited to include only 100, the student can modify this value themselves and re-run the code.
 n_genes_values <- c(100, 1000, 10000)
 
 p_null <- lapply(n_genes_values, function(m) {
@@ -172,23 +173,24 @@ ggsave(here("output", "pvalues_no_signal.pdf"), plot_null, width = 12, height = 
 plot_null
 ```
 
-> What happens to the shape of the histogram when the number of genes increases? What does the histogram look like for a large number of genes that are not different, and what does it tell you about their p-values?
-
 <!-- solution:text -->
-> **Answer:** With 100 genes, the histogram is irregular, because of chance : there are too few p-values to see a pattern. The more genes, the closer the histogram gets to a flat line (the dashed line). With a large number of genes, the histogram is flat : when there is no true difference, all p-values between 0 and 1 are equally likely (the p-values follow a uniform distribution). This is what a p-value is designed to be.
+> **Answer:** With 100 genes, the histogram is irregular, because of chance : there are too few p-values to see a pattern. The more genes, the closer the histogram gets to a flat line (the dashed line). With a large number of genes, the histogram is flat : when there is no true difference, all p-values between 0 and 1 are equally likely (the p-values follow a uniform distribution). Here, you should talk about the cumulative density function of the uniform and why this produces the definition of a p-value...
 <!-- /solution -->
 
-> What proportion of the genes with no true difference are declared significant? Why this number? How does it depend on the number of genes?
+> What proportion of the genes with no true difference are declared significant at the 5% level?
 
 <!-- solution:text -->
-> **Answer:** `r sprintf("%.1f", 100 * prop_signif_null$prop_signif[3])`% of the 10,000 genes are declared significant, i.e. about 5% (`r sprintf("%.1f", 100 * prop_signif_null$prop_signif[1])`% with 100 genes, `r sprintf("%.1f", 100 * prop_signif_null$prop_signif[2])`% with 1,000 : the more genes, the closer to 5%). Since the p-values are uniform, the probability that a p-value falls below 0.05 is exactly 0.05. This probability of declaring significant a gene that is not different is the **false positive rate** (FPR) of the test : by choosing a threshold of 0.05, we choose to accept a 5% false positive rate. It does not depend on the sample size or on the variability of the data.
+> **Answer:** As the number of genes increases, the percentage of genes significant at the 5% level approaches 5%.
 <!-- /solution -->
 
 ## 1b) Genes with a true difference
 
-> What happens when the gene *is* truly different? Let's simulate 10,000 genes for several values of `delta`, from 0 (no difference) to 3 (a difference of 3 standard deviations between the groups), and look at the p-values.
+> So, we just learned about the false positive rate, i.e. the proportion of true negatives that we declare positive after a statistical test. For a **valid** statistical test, the false positive rate is expected to match the **claimed** rate (i.e. the significance level of the test) exactly.
+
+> Now, what happens when the gene *is* truly differentially expressed? The below chunk simulates 10,000 genes with a small difference in expression ($\delta = 0.5$). Re-run the chunk using increasingly large values of $\delta$. What happens to the histogram of p-values? How does this differ from what we previously saw when $\delta = 0$, and why?
 
 ```{r}
+# This needs to be edited to start at 0.5 and get the student to change the value of data and qualitatively describe what happens to the histogram. 
 n_genes <- 10000   # number of genes simulated for each value of delta
 deltas <- c(0, 0.5, 1, 2, 3)
 
@@ -209,14 +211,14 @@ ggsave(here("output", "pvalues_by_delta.pdf"), plot_signal, width = 12, height =
 plot_signal
 ```
 
-> The proportion of genes declared significant (with a p-value below 0.05) is called the **power** of the test when the genes are truly different : it is the probability to detect a real difference. The following chunk computes it for a range of values of `delta`, with 10 and with 20 participants per group.
+> Among the true positives, the proportion of genes declared significant (i.e. with a p-value below 0.05) is called the **power** of the test: the probability to detect a real difference. The following chunk computes it for a range of values of `delta`, with 10 and with 20 participants per group. What do you notice about the results of this experiment?
 
 ```{r}
-power_df <- expand.grid(delta = seq(0, 3, 0.25), n = c(10, 20)) %>%
+power_df <- expand.grid(delta = seq(0, 3, 0.25), n = c(10, 20, 50)) %>%
   rowwise() %>%
   mutate(proportion_significant = mean(simulate_pvalues(rep(delta, n_genes), n = n) < 0.05)) %>%
   ungroup() %>%
-  mutate(n = factor(n, labels = c("10 per group", "20 per group")))
+  mutate(n = factor(n, labels = c("10 per group", "20 per group", "50 per group")))
 
 plot_power <- ggplot(power_df, aes(x = delta, y = proportion_significant, colour = n)) +
   geom_hline(yintercept = 0.05, linetype = "dashed") +
@@ -230,16 +232,8 @@ ggsave(here("output", "power_curve.pdf"), plot_power, width = 8, height = 5)
 plot_power
 ```
 
-> How do the histogram of the p-values and the proportion of significant genes change when `delta` increases?
-
 <!-- solution:text -->
-> **Answer:** As `delta` increases, the p-values are more and more concentrated near 0, and the proportion of genes declared significant increases : from about 5% for `delta = 0` to `r sprintf("%.0f", 100 * power_df$proportion_significant[power_df$delta == 1 & power_df$n == "10 per group"])`% for `delta = 1` and almost 100% for `delta = 3` (with 10 participants per group). The larger the true difference, the easier it is to detect.
-<!-- /solution -->
-
-> When `delta = 0`, the curve is at 5%. What does this value represent when `delta = 0`, and what does it represent when `delta` is larger? Besides the size of the difference, what else increases the power?
-
-<!-- solution:text -->
-> **Answer:** When `delta = 0`, it is the false positive rate, the probability of declaring significant a gene that is not different (which is fixed by the threshold, 5%). When `delta` is larger, it is the power, the probability of detecting a real difference. The power also increases with the number of participants : the curve with 20 participants per group is above that with 10, for example for `delta = 1` (`r sprintf("%.0f", 100 * power_df$proportion_significant[power_df$delta == 1 & power_df$n == "20 per group"])`% against `r sprintf("%.0f", 100 * power_df$proportion_significant[power_df$delta == 1 & power_df$n == "10 per group"])`%). It would also increase with a less variable measurement (smaller standard deviation) or a higher threshold, but a higher threshold would also increase the false positive rate.
+> **Answer:** As `delta` increases, the p-values are more and more concentrated near 0, and the proportion of genes declared significant increases : from about 5% for `delta = 0` to `r sprintf("%.0f", 100 * power_df$proportion_significant[power_df$delta == 1 & power_df$n == "10 per group"])`% for `delta = 1` and almost 100% for `delta = 3` (with 10 participants per group). The larger the true difference, the easier it is to detect. In addition, the more participants within each group, the faster this power rises with the size of the effect. This is because, given the same data generation, higher sample sizes result in a more precise estimate of the true effect, which is therefore more likely to be detected through testing (perhaps you can make this answer a bit clearer). 
 <!-- /solution -->
 
 ## 1c) A mix of genes with and without a true difference
