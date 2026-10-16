@@ -436,7 +436,7 @@ dim(counts_combat)
 table(metadata_all$testGroup)
 ```
 
-> We perform the differential expression analysis with the voom-limma pipeline, as in the previous practical. For each gene, it tests whether its mean expression differs between the active tuberculosis patients and the control group, and returns a p-value. You do not need to understand the details of the pipeline here : what matters is its output, a table with one row per gene and one p-value per gene (the column `P.Value`).
+> We perform the differential expression analysis with the voom-limma pipeline, as in the previous practical. For each gene, it tests whether its mean expression differs between the active tuberculosis patients and the control group, and returns a p-value.
 
 ```{r}
 # Design matrix : the coefficient "testGroupActiveTB" compares ActiveTB to control
